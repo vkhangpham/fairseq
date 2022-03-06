@@ -23,7 +23,6 @@ from fairseq.modules import (
 from fairseq.modules.transformer_sentence_encoder import init_bert_params
 from fairseq.utils import safe_hasattr
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -261,18 +260,20 @@ class MaskedLMEncoder(FairseqEncoder):
             src_tokens,
             segment_labels=segment_labels,
         )
-
         x = inner_states[-1].transpose(0, 1)
         # project masked tokens only
         if masked_tokens is not None:
             x = x[masked_tokens, :]
-        x = self.layer_norm(self.activation_fn(self.lm_head_transform_weight(x)))
 
+        # store final hidden before layernorm to calculate MSE loss
+        final_hidden = x.clone()
+
+        x = self.layer_norm(self.activation_fn(self.lm_head_transform_weight(x)))
         pooled_output = self.pooler_activation(self.masked_lm_pooler(sentence_rep))
 
         # project back to size of vocabulary
         if self.share_input_output_embed and hasattr(
-            self.sentence_encoder.embed_tokens, "weight"
+                self.sentence_encoder.embed_tokens, "weight"
         ):
             x = F.linear(x, self.sentence_encoder.embed_tokens.weight)
         elif self.embed_out is not None:
@@ -287,6 +288,8 @@ class MaskedLMEncoder(FairseqEncoder):
             "inner_states": inner_states,
             "pooled_output": pooled_output,
             "sentence_logits": sentence_logits,
+            "linear_weights": self.sentence_encoder.embed_tokens.weight,
+            "final_hidden": final_hidden
         }
 
     def max_positions(self):
@@ -295,17 +298,17 @@ class MaskedLMEncoder(FairseqEncoder):
 
     def upgrade_state_dict_named(self, state_dict, name):
         if isinstance(
-            self.sentence_encoder.embed_positions, SinusoidalPositionalEmbedding
+                self.sentence_encoder.embed_positions, SinusoidalPositionalEmbedding
         ):
             state_dict[
                 name + ".sentence_encoder.embed_positions._float_tensor"
-            ] = torch.FloatTensor(1)
+                ] = torch.FloatTensor(1)
         if not self.load_softmax:
             for k in list(state_dict.keys()):
                 if (
-                    "embed_out.weight" in k
-                    or "sentence_projection_layer.weight" in k
-                    or "lm_output_learned_bias" in k
+                        "embed_out.weight" in k
+                        or "sentence_projection_layer.weight" in k
+                        or "lm_output_learned_bias" in k
                 ):
                     del state_dict[k]
         return state_dict
@@ -394,6 +397,33 @@ def xlm_architecture(args):
 
     args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 8)
     args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 4096)
+
+    args.sent_loss = getattr(args, "sent_loss", False)
+
+    args.activation_fn = getattr(args, "activation_fn", "gelu")
+    args.encoder_normalize_before = getattr(args, "encoder_normalize_before", False)
+    args.pooler_activation_fn = getattr(args, "pooler_activation_fn", "tanh")
+    args.apply_bert_init = getattr(args, "apply_bert_init", True)
+    base_architecture(args)
+
+
+@register_model_architecture("masked_lm", "cl_encoder")
+def cl_encoder(args):
+    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 1024)
+    args.max_positions = getattr(args, "max_positions", 128)
+
+    args.share_encoder_input_output_embed = getattr(
+        args, "share_encoder_input_output_embed", True
+    )
+    args.no_token_positional_embeddings = getattr(
+        args, "no_token_positional_embeddings", False
+    )
+    args.encoder_learned_pos = getattr(args, "encoder_learned_pos", True)
+    args.num_segment = getattr(args, "num_segment", 1)
+
+    args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 8)
+    args.encoder_layers = getattr(args, "encoder_layers", 6)
+    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 1024)
 
     args.sent_loss = getattr(args, "sent_loss", False)
 
