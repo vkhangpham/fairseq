@@ -273,25 +273,3 @@ def transformer_wmt_en_de_big_t2t(args):
     args.attention_dropout = getattr(args, "attention_dropout", 0.1)
     args.activation_dropout = getattr(args, "activation_dropout", 0.1)
     transformer_vaswani_wmt_en_de_big(args)
-
-
-@register_model_architecture("transformer", "cl_decoder")
-def cl_decoder(args):
-    args.decoder_embed_dim = getattr(args, "decoder_embed_dim", 1024)
-    args.decoder_ffn_embed_dim = getattr(
-        args, "decoder_ffn_embed_dim", args.encoder_ffn_embed_dim
-    )
-    args.decoder_layers = getattr(args, "decoder_layers", 6)
-    args.decoder_attention_heads = getattr(args, "decoder_attention_heads", 8)
-    args.decoder_normalize_before = getattr(args, "decoder_normalize_before", False)
-    args.decoder_learned_pos = getattr(args, "decoder_learned_pos", False)
-    args.attention_dropout = getattr(args, "attention_dropout", 0.0)
-    args.activation_dropout = getattr(args, "activation_dropout", 0.0)
-    args.activation_fn = getattr(args, "activation_fn", "relu")
-    args.dropout = getattr(args, "dropout", 0.1)
-    args.adaptive_softmax_dropout = getattr(args, "adaptive_softmax_dropout", 0)
-    args.share_decoder_input_output_embed = getattr(
-        args, "share_decoder_input_output_embed", True
-    )
-    args.share_all_embeddings = getattr(args, "share_all_embeddings", False)
-    base_architecture(args)
