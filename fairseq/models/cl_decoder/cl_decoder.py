@@ -67,7 +67,9 @@ class CLDecoderBase(FairseqEncoderDecoderModel):
             cfg.decoder.layers = len(cfg.decoder.layers_to_keep.split(","))
 
         src_dict, tgt_dict = task.source_dictionary, task.target_dictionary
-
+        CLDecoderBase.embed_tokens = cls.build_embedding(
+            cfg, src_dict, cfg.encoder.embed_dim, cfg.encoder.embed_path
+        )
         if cfg.share_all_embeddings:
             if src_dict != tgt_dict:
                 raise ValueError("--share-all-embeddings requires a joined dictionary")
@@ -76,7 +78,7 @@ class CLDecoderBase(FairseqEncoderDecoderModel):
                     "--share-all-embeddings requires --encoder-embed-dim to match --decoder-embed-dim"
                 )
             if cfg.decoder.embed_path and (
-                cfg.decoder.embed_path != cfg.encoder.embed_path
+                    cfg.decoder.embed_path != cfg.encoder.embed_path
             ):
                 raise ValueError(
                     "--share-all-embeddings not compatible with --decoder-embed-path"
@@ -131,14 +133,14 @@ class CLDecoderBase(FairseqEncoderDecoderModel):
     # TorchScript doesn't support optional arguments with variable length (**kwargs).
     # Current workaround is to add union of all arguments in child classes.
     def forward(
-        self,
-        src_tokens,
-        src_lengths,
-        prev_output_tokens,
-        return_all_hiddens: bool = True,
-        features_only: bool = False,
-        alignment_layer: Optional[int] = None,
-        alignment_heads: Optional[int] = None,
+            self,
+            src_tokens,
+            src_lengths,
+            prev_output_tokens,
+            return_all_hiddens: bool = True,
+            features_only: bool = False,
+            alignment_layer: Optional[int] = None,
+            alignment_heads: Optional[int] = None,
     ):
         """
         Run the forward pass for an encoder-decoder model.
@@ -150,6 +152,7 @@ class CLDecoderBase(FairseqEncoderDecoderModel):
         encoder_padding_mask = src_tokens.eq(self.encoder.padding_idx)
         has_pads = src_tokens.device.type == "xla" or encoder_padding_mask.any()
         embed_tokens = CLDecoderBase.embed_tokens
+        embed_tokens.to(torch.device('cuda:0'))
         token_embedding = embed_tokens(src_tokens)
         x = encoder_embedding = self.encoder.embed_scale * token_embedding
         if self.encoder.embed_positions is not None:
@@ -176,6 +179,7 @@ class CLDecoderBase(FairseqEncoderDecoderModel):
             "src_tokens": [],
             "src_lengths": [src_lengths],
         }
+
         decoder_out = self.decoder(
             prev_output_tokens,
             encoder_out=encoder_out,
@@ -192,18 +196,17 @@ class CLDecoderBase(FairseqEncoderDecoderModel):
     # helper function in the Base Class.
     @torch.jit.export
     def get_normalized_probs(
-        self,
-        net_output: Tuple[Tensor, Optional[Dict[str, List[Optional[Tensor]]]]],
-        log_probs: bool,
-        sample: Optional[Dict[str, Tensor]] = None,
+            self,
+            net_output: Tuple[Tensor, Optional[Dict[str, List[Optional[Tensor]]]]],
+            log_probs: bool,
+            sample: Optional[Dict[str, Tensor]] = None,
     ):
         """Get normalized probabilities (or log probs) from a net's output."""
         return self.get_normalized_probs_scriptable(net_output, log_probs, sample)
 
 
-def Embedding(num_embeddings, embedding_dim, padding_idx, pretrained_weight):
+def Embedding(num_embeddings, embedding_dim, padding_idx):
     m = nn.Embedding(num_embeddings, embedding_dim, padding_idx=padding_idx)
     nn.init.normal_(m.weight, mean=0, std=embedding_dim ** -0.5)
     nn.init.constant_(m.weight[padding_idx], 0)
-    # m.weight.data.copy_(torch.from_numpy(pretrained_weight))
     return m

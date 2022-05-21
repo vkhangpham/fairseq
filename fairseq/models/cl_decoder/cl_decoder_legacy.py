@@ -14,8 +14,8 @@ from fairseq.models.transformer.transformer_config import (
     DEFAULT_MAX_TARGET_POSITIONS,
     DEFAULT_MIN_PARAMS_TO_WRAP,
 )
-from fairseq.models.transformer.cl_decoder import (
-    CLDecoderBase,
+from fairseq.models.cl_decoder.cl_decoder import (
+    CLDecoderBase
 )
 
 
@@ -25,7 +25,7 @@ class CLDecoderModel(CLDecoderBase):
     This is the legacy implementation of the transformer model that
     uses argparse for configuration.
     """
-
+    
     def __init__(self, args, encoder, decoder):
         cfg = TransformerConfig.from_namespace(args)
         super().__init__(cfg, encoder, decoder)
@@ -105,12 +105,11 @@ class CLDecoderModel(CLDecoderBase):
 
 # architectures
 
-
-@register_model_architecture("cl_decoder", "cl_decoder_base")
+@register_model_architecture("cl_decoder", "cl_decoder")
 def base_architecture(args):
     args.encoder_embed_path = getattr(args, "encoder_embed_path", None)
-    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
-    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 2048)
+    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 1024)
+    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 1024)
     args.encoder_layers = getattr(args, "encoder_layers", 6)
     args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 8)
     args.encoder_normalize_before = getattr(args, "encoder_normalize_before", False)
@@ -160,25 +159,3 @@ def base_architecture(args):
     args.quant_noise_pq = getattr(args, "quant_noise_pq", 0)
     args.quant_noise_pq_block_size = getattr(args, "quant_noise_pq_block_size", 8)
     args.quant_noise_scalar = getattr(args, "quant_noise_scalar", 0)
-
-
-@register_model_architecture("cl_decoder", "cl_decoder_arch")
-def cl_decoder(args):
-    args.decoder_embed_dim = getattr(args, "decoder_embed_dim", 1024)
-    args.decoder_ffn_embed_dim = getattr(
-        args, "decoder_ffn_embed_dim", args.encoder_ffn_embed_dim
-    )
-    args.decoder_layers = getattr(args, "decoder_layers", 6)
-    args.decoder_attention_heads = getattr(args, "decoder_attention_heads", 8)
-    args.decoder_normalize_before = getattr(args, "decoder_normalize_before", False)
-    args.decoder_learned_pos = getattr(args, "decoder_learned_pos", False)
-    args.attention_dropout = getattr(args, "attention_dropout", 0.0)
-    args.activation_dropout = getattr(args, "activation_dropout", 0.0)
-    args.activation_fn = getattr(args, "activation_fn", "relu")
-    args.dropout = getattr(args, "dropout", 0.1)
-    args.adaptive_softmax_dropout = getattr(args, "adaptive_softmax_dropout", 0)
-    args.share_decoder_input_output_embed = getattr(
-        args, "share_decoder_input_output_embed", True
-    )
-    args.share_all_embeddings = getattr(args, "share_all_embeddings", False)
-    base_architecture(args)
