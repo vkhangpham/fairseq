@@ -80,10 +80,11 @@ class MLM_MSELoss(FairseqCriterion):
 
         # reshape lm_logits from (N,T,C) to (N*T,C)
         lm_logits = lm_logits.view(-1, lm_logits.size(-1))
-        lm_targets = sample["lm_target"].view(-1)
+        lm_targets = sample["lm_target"]
+        masked_tokens = lm_targets.ne(self.padding_idx)
+        lm_targets = lm_targets.view(-1)
         lm_loss = compute_cross_entropy_loss(lm_logits, lm_targets, self.padding_idx)
 
-        masked_tokens = sample["lm_target"].ne(self.padding_idx)
         if masked_tokens.device == torch.device("cpu"):
             if not masked_tokens.any():
                 masked_tokens = None
@@ -96,26 +97,33 @@ class MLM_MSELoss(FairseqCriterion):
 
         # Get weights of the final linear layer
         linear_weights = model(**sample["net_input"], masked_tokens=masked_tokens)[1]['linear_weights']
-        linear_weights = linear_weights[lm_targets]
+        masked_idx = lm_targets[torch.flatten(masked_tokens)]
+        linear_weights = linear_weights[masked_idx]
 
         # Get final hidden embeddings (before LN)
         final_hidden = model(**sample["net_input"], masked_tokens=masked_tokens)[1]['final_hidden']
         final_hidden = final_hidden.reshape(-1, final_hidden.size(-1))
+        final_hidden = final_hidden[torch.flatten(masked_tokens)]
 
         # Calculate MSE loss between linear weights and final hidden embeddings
         mse_loss = F.mse_loss(
             final_hidden,
             linear_weights,
-            reduction='mean'
+            reduction='sum'
         )
 
         # compute the number of tokens for which loss is computed. This is used
         # to normalize the loss
         ntokens = utils.strip_pad(lm_targets, self.padding_idx).numel()
-        loss = lm_loss / ntokens + mse_loss
+        loss = (lm_loss + mse_loss) / ntokens
         nsentences = sample["nsentences"]
         # nsentences = 0
 
+        # print("\n======\n")
+        # torch.set_printoptions(profile="full")
+        # print(mse_loss)
+        # print(lm_loss, ntokens, lm_loss/ntokens)
+        # print(loss)
 
         # Compute sentence loss if masked_lm_only is False
         sentence_loss = None
@@ -146,7 +154,7 @@ class MLM_MSELoss(FairseqCriterion):
         logging_output = {
             "loss": utils.item(loss.data) if reduce else loss.data,
             "lm_loss": utils.item(lm_loss.data) if reduce else lm_loss.data,
-
+            "mse_loss": mse_loss.data,
             # sentence loss is not always computed
             "sentence_loss": (
                 (utils.item(sentence_loss.data) if reduce else sentence_loss.data)
@@ -163,6 +171,7 @@ class MLM_MSELoss(FairseqCriterion):
     def reduce_metrics(logging_outputs) -> None:
         """Aggregate logging outputs from data parallel training."""
         lm_loss_sum = sum(log.get("lm_loss", 0) for log in logging_outputs)
+        mse_loss_sum = sum(log.get("mse_loss", 0) for log in logging_outputs)
         sentence_loss_sum = sum(log.get("sentence_loss", 0) for log in logging_outputs)
         ntokens = sum(log.get("ntokens", 0) for log in logging_outputs)
         nsentences = sum(log.get("nsentences", 0) for log in logging_outputs)
@@ -178,6 +187,12 @@ class MLM_MSELoss(FairseqCriterion):
         metrics.log_scalar(
             "lm_loss",
             lm_loss_sum / ntokens / math.log(2) if ntokens > 0 else 0.0,
+            ntokens,
+            round=3,
+        )
+        metrics.log_scalar(
+            "mse_loss",
+            mse_loss_sum / ntokens / math.log(2) if ntokens > 0 else 0.0,
             ntokens,
             round=3,
         )

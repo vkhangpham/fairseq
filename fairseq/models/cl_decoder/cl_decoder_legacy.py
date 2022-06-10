@@ -25,7 +25,7 @@ class CLDecoderModel(CLDecoderBase):
     This is the legacy implementation of the transformer model that
     uses argparse for configuration.
     """
-    
+
     def __init__(self, args, encoder, decoder):
         cfg = TransformerConfig.from_namespace(args)
         super().__init__(cfg, encoder, decoder)

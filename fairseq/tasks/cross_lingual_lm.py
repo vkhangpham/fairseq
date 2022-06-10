@@ -182,10 +182,19 @@ class CrossLingualLMTask(LegacyFairseqTask):
             )
 
         self.datasets[split] = MultiCorpusSampledDataset(dataset_map)
-        logger.info(
-            "{} {} {} examples".format(
-                utils.split_paths(self.args.data)[epoch - 1],
-                split,
-                len(self.datasets[split]),
+        if (len(utils.split_paths(self.args.data)) < epoch):
+            logger.info(
+                "{} {} {} examples".format(
+                    utils.split_paths(self.args.data)[0],
+                    split,
+                    len(self.datasets[split]),
+                )
             )
-        )
+        else:
+            logger.info(
+                "{} {} {} examples".format(
+                    utils.split_paths(self.args.data)[epoch - 1],
+                    split,
+                    len(self.datasets[split]),
+                )
+            )
