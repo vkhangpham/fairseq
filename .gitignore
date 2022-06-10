@@ -139,3 +139,5 @@ wandb/
 nohup.out
 multirun
 outputs
+
+/fairseq/models/transformer/*test.py
