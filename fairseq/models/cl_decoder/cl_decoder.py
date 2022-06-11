@@ -4,6 +4,8 @@
 # LICENSE file in the root directory of this source tree.
 
 from typing import Dict, List, Optional, Tuple
+import os
+
 
 import torch
 import torch.nn as nn
@@ -106,15 +108,15 @@ class CLDecoderBase(FairseqEncoderDecoderModel):
         return cls(cfg, encoder, decoder)
 
     @classmethod
-    def build_embedding(cls, cfg, dictionary, embed_dim, path=None):
+    def build_embedding(cls, cfg, dictionary, embed_dim):
         num_embeddings = len(dictionary)
         padding_idx = dictionary.pad()
 
         emb = Embedding(num_embeddings, embed_dim, padding_idx)
         # if provided, load from preloaded dictionaries
-        if path:
-            embed_dict = utils.parse_embedding(path)
-            utils.load_embedding(embed_dict, dictionary, emb)
+        # if path:
+        #     embed_dict = utils.parse_embedding(path)
+        #     utils.load_embedding(embed_dict, dictionary, emb)
         return emb
 
     @classmethod
@@ -165,10 +167,16 @@ class CLDecoderBase(FairseqEncoderDecoderModel):
             x = x * (1 - encoder_padding_mask.unsqueeze(-1).type_as(x))
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
+
         encoder_states = []
         fc_results = []
-        if return_all_hiddens:
-            encoder_states.append(x)
+
+        src_lengths = (
+            src_tokens.ne(self.padding_idx)
+                .sum(dim=1, dtype=torch.int32)
+                .reshape(-1, 1)
+                .contiguous()
+        )
 
         encoder_out = {
             "encoder_out": [x],  # T x B x C
@@ -205,8 +213,16 @@ class CLDecoderBase(FairseqEncoderDecoderModel):
         return self.get_normalized_probs_scriptable(net_output, log_probs, sample)
 
 
+from fairseq.models.masked_lm import MaskedLMModel
+
+model = MaskedLMModel.from_pretrained(
+  '/content/checkpoints/mlm',
+  checkpoint_file="checkpoint_best.pt",
+  data_name_or_path="/content/data/iwslt14/fairseq_processed",
+)
+pretrained_emb = model.get_submodule("models.0.encoder.sentence_encoder.embed_tokens")
+
+
 def Embedding(num_embeddings, embedding_dim, padding_idx):
-    m = nn.Embedding(num_embeddings, embedding_dim, padding_idx=padding_idx)
-    nn.init.normal_(m.weight, mean=0, std=embedding_dim ** -0.5)
-    nn.init.constant_(m.weight[padding_idx], 0)
+    m = nn.Embedding.from_pretrained(pretrained_emb.weights, padding_idx=pretrained_emb.padding_idx)
     return m

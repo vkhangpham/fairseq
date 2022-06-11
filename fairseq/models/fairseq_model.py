@@ -293,7 +293,7 @@ class FairseqEncoderDecoderModel(BaseFairseqModel):
         self.encoder = encoder
         self.decoder = decoder
 
-        check_type(self.encoder, FairseqEncoder)
+        # check_type(self.encoder, FairseqEncoder)
         check_type(self.decoder, FairseqDecoder)
 
     def forward(self, src_tokens, src_lengths, prev_output_tokens, **kwargs):

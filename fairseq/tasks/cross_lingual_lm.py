@@ -96,6 +96,10 @@ class CrossLingualLMTask(LegacyFairseqTask):
     def target_dictionary(self):
         return self.dictionary
 
+    @property
+    def source_dictionary(self):
+        return self.dictionary
+
     @classmethod
     def setup_task(cls, args, **kwargs):
         """Setup the task."""
