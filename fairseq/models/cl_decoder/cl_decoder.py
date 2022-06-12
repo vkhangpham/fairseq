@@ -108,8 +108,11 @@ class CLDecoderBase(FairseqEncoderDecoderModel):
         return cls(cfg, encoder, decoder)
 
     @classmethod
-    def build_embedding(cls, cfg, dictionary, embed_dim):
+    def build_embedding(cls, cfg, dictionary, embed_dim, path=None):
         num_embeddings = len(dictionary)
+        # for i in range(20):
+        #     print(dictionary.__getitem__(i))
+        # assert False
         padding_idx = dictionary.pad()
 
         emb = Embedding(num_embeddings, embed_dim, padding_idx)
@@ -172,7 +175,7 @@ class CLDecoderBase(FairseqEncoderDecoderModel):
         fc_results = []
 
         src_lengths = (
-            src_tokens.ne(self.padding_idx)
+            src_tokens.ne(self.encoder.padding_idx)
                 .sum(dim=1, dtype=torch.int32)
                 .reshape(-1, 1)
                 .contiguous()
@@ -213,16 +216,17 @@ class CLDecoderBase(FairseqEncoderDecoderModel):
         return self.get_normalized_probs_scriptable(net_output, log_probs, sample)
 
 
-from fairseq.models.masked_lm import MaskedLMModel
+# from fairseq.models.masked_lm import MaskedLMModel
 
-model = MaskedLMModel.from_pretrained(
-  '/content/checkpoints/mlm',
-  checkpoint_file="checkpoint_best.pt",
-  data_name_or_path="/content/data/iwslt14/fairseq_processed",
-)
-pretrained_emb = model.get_submodule("models.0.encoder.sentence_encoder.embed_tokens")
+# model = MaskedLMModel.from_pretrained(
+#   '/content/checkpoints/mlm',
+#   checkpoint_file="checkpoint_best.pt",
+#   data_name_or_path="/content/data/iwslt14/fairseq_processed",
+# )
+# pretrained_emb = model.get_submodule("models.0.encoder.sentence_encoder.embed_tokens")
 
 
 def Embedding(num_embeddings, embedding_dim, padding_idx):
-    m = nn.Embedding.from_pretrained(pretrained_emb.weights, padding_idx=pretrained_emb.padding_idx)
-    return m
+    pretrained_emb = torch.nn.Embedding(num_embeddings,embedding_dim, padding_idx=padding_idx)
+    pretrained_emb.load_state_dict(torch.load("/content/pretrained/pretrained_emb.pt"))
+    return pretrained_emb
