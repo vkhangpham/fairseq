@@ -96,7 +96,7 @@ class MLM_MSELoss(FairseqCriterion):
             )
 
         # Get weights of the final linear layer
-        linear_weights = model(**sample["net_input"], masked_tokens=masked_tokens)[1]['linear_weights']
+        linear_weights = model.encoder.embed_out.weight
         masked_idx = lm_targets[torch.flatten(masked_tokens)]
         linear_weights = linear_weights[masked_idx]
 
@@ -109,13 +109,13 @@ class MLM_MSELoss(FairseqCriterion):
         mse_loss = F.mse_loss(
             final_hidden,
             linear_weights,
-            reduction='sum'
+            reduction='mean'
         )
 
         # compute the number of tokens for which loss is computed. This is used
         # to normalize the loss
         ntokens = utils.strip_pad(lm_targets, self.padding_idx).numel()
-        loss = (lm_loss + mse_loss) / ntokens
+        loss = lm_loss/ntokens + mse_loss
         nsentences = sample["nsentences"]
         # nsentences = 0
 
@@ -212,8 +212,8 @@ class MLM_MSELoss(FairseqCriterion):
     @staticmethod
     def logging_outputs_can_be_summed() -> bool:
         """
-        Whether the logging outputs returned by `forward` can be summed
-        across workers prior to calling `reduce_metrics`. Setting this
+        Whether the logging outputs returned by forward can be summed
+        across workers prior to calling reduce_metrics. Setting this
         to True will improves distributed training speed.
         """
         return True

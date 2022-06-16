@@ -289,7 +289,6 @@ class MaskedLMEncoder(FairseqEncoder):
             "inner_states": inner_states,
             "pooled_output": pooled_output,
             "sentence_logits": sentence_logits,
-            "linear_weights": self.sentence_encoder.embed_tokens.weight,
             "final_hidden": final_hidden
         }
 
@@ -414,7 +413,7 @@ def cl_encoder(args):
     args.max_positions = getattr(args, "max_positions", 128)
 
     args.share_encoder_input_output_embed = getattr(
-        args, "share_encoder_input_output_embed", True
+        args, "share_encoder_input_output_embed", False
     )
     args.no_token_positional_embeddings = getattr(
         args, "no_token_positional_embeddings", False
@@ -424,7 +423,7 @@ def cl_encoder(args):
 
     args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 8)
     args.encoder_layers = getattr(args, "encoder_layers", 6)
-    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 1024)
+    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 4096)
 
     args.sent_loss = getattr(args, "sent_loss", False)
 
