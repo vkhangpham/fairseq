@@ -20,6 +20,9 @@ class MaskedLMDictionary(Dictionary):
         mask="<mask>",
     ):
         super().__init__(pad=pad, eos=eos, unk=unk)
+        extra_special_symbols = ['<special1>', '<special2>','<special3>','<special4>','<special5>','<special6>','<special7>','<special8>']
+        for s in extra_special_symbols:
+            self.add_symbol(s)
         self.mask_word = mask
         self.mask_index = self.add_symbol(mask)
         self.nspecial = len(self.symbols)
