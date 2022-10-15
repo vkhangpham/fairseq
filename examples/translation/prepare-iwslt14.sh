@@ -2,11 +2,13 @@
 #
 # Adapted from https://github.com/facebookresearch/MIXER/blob/master/prepareData.sh
 
+<<com
 echo 'Cloning Moses github repository (for tokenization scripts)...'
 git clone https://github.com/moses-smt/mosesdecoder.git
 
 echo 'Cloning Subword NMT repository (for BPE pre-processing)...'
 git clone https://github.com/rsennrich/subword-nmt.git
+com
 
 SCRIPTS=mosesdecoder/scripts
 TOKENIZER=$SCRIPTS/tokenizer/tokenizer.perl
@@ -31,6 +33,7 @@ tmp=$prep/tmp
 orig=orig
 
 mkdir -p $orig $tmp $prep
+
 
 echo "Downloading data from ${URL}..."
 cd $orig
@@ -83,7 +86,6 @@ for l in $src $tgt; do
     done
 done
 
-
 echo "creating train, valid, test..."
 for l in $src $tgt; do
     awk '{if (NR%23 == 0)  print $0; }' $tmp/train.tags.de-en.$l > $tmp/valid.$l
@@ -97,19 +99,22 @@ for l in $src $tgt; do
         > $tmp/test.$l
 done
 
-TRAIN=$tmp/train.en-de
-BPE_CODE=$prep/code
-rm -f $TRAIN
-for l in $src $tgt; do
-    cat $tmp/train.$l >> $TRAIN
-done
+#TRAIN=$tmp/train.en-de
+#BPE_CODE=$prep/code
+#rm -f $TRAIN
+#for l in $src $tgt; do
+#    cat $tmp/train.$l >> $TRAIN
+#done
 
-echo "learn_bpe.py on ${TRAIN}..."
-python $BPEROOT/learn_bpe.py -s $BPE_TOKENS < $TRAIN > $BPE_CODE
+
+#echo "learn_bpe.py on ${TRAIN}..."
+#python $BPEROOT/learn_bpe.py -s $BPE_TOKENS < $TRAIN > $BPE_CODE
+cp /root/khang/code/XLM/data/processed/tmp/codes $prep/code
 
 for L in $src $tgt; do
     for f in train.$L valid.$L test.$L; do
-        echo "apply_bpe.py to ${f}..."
-        python $BPEROOT/apply_bpe.py -c $BPE_CODE < $tmp/$f > $prep/$f
+        echo "applybpe.py to ${f}..."
+	fastBPE/fast applybpe $prep/$f $tmp/$f $prep/code
+        #python $BPEROOT/apply_bpe.py -c $KDATA/codes --vocabulary $KDATA/dict.$L.txt < $tmp/$f > $prep/$f
     done
 done

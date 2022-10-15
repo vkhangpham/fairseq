@@ -96,6 +96,10 @@ class CrossLingualLMTask(LegacyFairseqTask):
     def target_dictionary(self):
         return self.dictionary
 
+    @property
+    def source_dictionary(self):
+        return self.dictionary
+
     @classmethod
     def setup_task(cls, args, **kwargs):
         """Setup the task."""
@@ -182,10 +186,12 @@ class CrossLingualLMTask(LegacyFairseqTask):
             )
 
         self.datasets[split] = MultiCorpusSampledDataset(dataset_map)
-        logger.info(
-            "{} {} {} examples".format(
-                utils.split_paths(self.args.data)[epoch - 1],
-                split,
-                len(self.datasets[split]),
-            )
-        )
+        #if epoch < 1:
+        #    return
+        #logger.info(
+        #    "{} {} {} examples".format(
+        #        utils.split_paths(self.args.data)[epoch - 1],
+        #        split,
+        #        len(self.datasets[split]),
+        #    )
+        #)

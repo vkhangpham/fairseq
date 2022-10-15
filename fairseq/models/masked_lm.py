@@ -23,7 +23,6 @@ from fairseq.modules import (
 from fairseq.modules.transformer_sentence_encoder import init_bert_params
 from fairseq.utils import safe_hasattr
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -148,7 +147,12 @@ class MaskedLMModel(FairseqEncoderModel):
         )
 
     def forward(self, src_tokens, segment_labels=None, **kwargs):
-        return self.encoder(src_tokens, segment_labels=segment_labels, **kwargs)
+        try:
+            return self.encoder(src_tokens, segment_labels=segment_labels, **kwargs)
+        except Exception as e:
+            import os
+            print(f"Error in {os.path.basename(__file__)}")
+            # from IPython import embed; embed()
 
     def max_positions(self):
         return self.encoder.max_positions
@@ -225,7 +229,7 @@ class MaskedLMEncoder(FairseqEncoder):
 
             if not self.share_input_output_embed:
                 self.embed_out = nn.Linear(
-                    args.encoder_embed_dim, self.vocab_size, bias=False
+                    args.encoder_embed_dim, self.vocab_size, bias=True
                 )
 
             if args.sent_loss:
@@ -256,38 +260,48 @@ class MaskedLMEncoder(FairseqEncoder):
                   is the prediction logit for NSP task and is only computed if
                   this is specified in the input arguments.
         """
+        try:
+            inner_states, sentence_rep = self.sentence_encoder(
+                src_tokens,
+                segment_labels=segment_labels,
+            )
+            x = inner_states[-1].transpose(0, 1)
 
-        inner_states, sentence_rep = self.sentence_encoder(
-            src_tokens,
-            segment_labels=segment_labels,
-        )
+            # store final hidden before layernorm to calculate MSE loss
+            final_hidden = x.clone()
 
-        x = inner_states[-1].transpose(0, 1)
-        # project masked tokens only
-        if masked_tokens is not None:
-            x = x[masked_tokens, :]
-        x = self.layer_norm(self.activation_fn(self.lm_head_transform_weight(x)))
+            # project masked tokens only
+            if masked_tokens is not None:
+                x = x[masked_tokens, :]
 
-        pooled_output = self.pooler_activation(self.masked_lm_pooler(sentence_rep))
+            x = self.layer_norm(self.activation_fn(self.lm_head_transform_weight(x)))
+            pooled_output = self.pooler_activation(self.masked_lm_pooler(sentence_rep))
 
-        # project back to size of vocabulary
-        if self.share_input_output_embed and hasattr(
-            self.sentence_encoder.embed_tokens, "weight"
-        ):
-            x = F.linear(x, self.sentence_encoder.embed_tokens.weight)
-        elif self.embed_out is not None:
-            x = self.embed_out(x)
-        if self.lm_output_learned_bias is not None:
-            x = x + self.lm_output_learned_bias
-        sentence_logits = None
-        if self.sentence_projection_layer:
-            sentence_logits = self.sentence_projection_layer(pooled_output)
+            # project back to size of vocabulary
+            if self.share_input_output_embed and hasattr(
+                    self.sentence_encoder.embed_tokens, "weight"
+            ):
+                x = F.linear(x, self.sentence_encoder.embed_tokens.weight)
+            elif self.embed_out is not None:
+                x = self.embed_out(x)
 
-        return x, {
-            "inner_states": inner_states,
-            "pooled_output": pooled_output,
-            "sentence_logits": sentence_logits,
-        }
+            if self.lm_output_learned_bias is not None:
+                x = x + self.lm_output_learned_bias
+
+            sentence_logits = None
+            if self.sentence_projection_layer:
+                sentence_logits = self.sentence_projection_layer(pooled_output)
+
+            return x, {
+                "inner_states": inner_states,
+                "pooled_output": pooled_output,
+                "sentence_logits": sentence_logits,
+                "final_hidden": final_hidden
+            }
+        except Exception as e:
+            import os
+            print(f"Error in {os.path.basename(__file__)}")
+            # from IPython import embed; embed()
 
     def max_positions(self):
         """Maximum output length supported by the encoder."""
@@ -295,17 +309,17 @@ class MaskedLMEncoder(FairseqEncoder):
 
     def upgrade_state_dict_named(self, state_dict, name):
         if isinstance(
-            self.sentence_encoder.embed_positions, SinusoidalPositionalEmbedding
+                self.sentence_encoder.embed_positions, SinusoidalPositionalEmbedding
         ):
             state_dict[
                 name + ".sentence_encoder.embed_positions._float_tensor"
-            ] = torch.FloatTensor(1)
+                ] = torch.FloatTensor(1)
         if not self.load_softmax:
             for k in list(state_dict.keys()):
                 if (
-                    "embed_out.weight" in k
-                    or "sentence_projection_layer.weight" in k
-                    or "lm_output_learned_bias" in k
+                        "embed_out.weight" in k
+                        or "sentence_projection_layer.weight" in k
+                        or "lm_output_learned_bias" in k
                 ):
                     del state_dict[k]
         return state_dict
@@ -394,6 +408,59 @@ def xlm_architecture(args):
 
     args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 8)
     args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 4096)
+
+    args.sent_loss = getattr(args, "sent_loss", False)
+
+    args.activation_fn = getattr(args, "activation_fn", "gelu")
+    args.encoder_normalize_before = getattr(args, "encoder_normalize_before", False)
+    args.pooler_activation_fn = getattr(args, "pooler_activation_fn", "tanh")
+    args.apply_bert_init = getattr(args, "apply_bert_init", True)
+    base_architecture(args)
+
+
+@register_model_architecture("masked_lm", "cl_encoder")
+def cl_encoder(args):
+    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 1024)
+    args.max_positions = getattr(args, "max_positions", 128)
+
+    args.share_encoder_input_output_embed = getattr(
+        args, "share_encoder_input_output_embed", False
+    )
+    args.no_token_positional_embeddings = getattr(
+        args, "no_token_positional_embeddings", False
+    )
+    args.encoder_learned_pos = getattr(args, "encoder_learned_pos", True)
+    args.num_segment = getattr(args, "num_segment", 2)
+
+    args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 8)
+    args.encoder_layers = getattr(args, "encoder_layers", 6)
+    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 4096)
+
+    args.sent_loss = getattr(args, "sent_loss", False)
+
+    args.activation_fn = getattr(args, "activation_fn", "gelu")
+    args.encoder_normalize_before = getattr(args, "encoder_normalize_before", False)
+    args.pooler_activation_fn = getattr(args, "pooler_activation_fn", "tanh")
+    args.apply_bert_init = getattr(args, "apply_bert_init", True)
+    base_architecture(args)
+
+@register_model_architecture("masked_lm", "toy")
+def toy(args):
+    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 300)
+    args.max_positions = getattr(args, "max_positions", 64)
+
+    args.share_encoder_input_output_embed = getattr(
+        args, "share_encoder_input_output_embed", False
+    )
+    args.no_token_positional_embeddings = getattr(
+        args, "no_token_positional_embeddings", False
+    )
+    args.encoder_learned_pos = getattr(args, "encoder_learned_pos", True)
+    args.num_segment = getattr(args, "num_segment", 2)
+
+    args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 1)
+    args.encoder_layers = getattr(args, "encoder_layers", 1)
+    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 256)
 
     args.sent_loss = getattr(args, "sent_loss", False)
 

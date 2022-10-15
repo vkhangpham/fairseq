@@ -26,6 +26,7 @@ from fairseq.data import (
     TruncatedDictionary,
     data_utils,
 )
+from fairseq.data.legacy.masked_lm_dictionary import MaskedLMDictionary
 from fairseq.data.indexed_dataset import get_available_dataset_impl
 from fairseq.data.shorten_dataset import maybe_shorten_dataset
 from fairseq.dataclass import ChoiceEnum, FairseqDataclass

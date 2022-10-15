@@ -25,6 +25,7 @@ from fairseq.data import (
     encoders,
     indexed_dataset,
 )
+from fairseq.data.legacy.masked_lm_dictionary import MaskedLMDictionary
 from fairseq.data.indexed_dataset import get_available_dataset_impl
 from fairseq.dataclass import ChoiceEnum, FairseqDataclass
 from fairseq.tasks import FairseqTask, register_task

@@ -581,6 +581,8 @@ def _upgrade_state_dict(state):
 
     # add optimizer_history
     if "optimizer_history" not in state:
+        if "best_loss" not in state:
+            state["best_loss"] = 10000
         state["optimizer_history"] = [
             {"criterion_name": "CrossEntropyCriterion", "best_loss": state["best_loss"]}
         ]
