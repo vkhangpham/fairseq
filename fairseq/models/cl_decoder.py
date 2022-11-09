@@ -25,6 +25,7 @@ from fairseq.modules import AdaptiveInput, CharacterTokenEmbedder
 from fairseq.utils import safe_getattr, safe_hasattr
 
 import torch
+import numpy as np
 
 DEFAULT_MAX_TARGET_POSITIONS = 1024
 
@@ -233,7 +234,7 @@ class CLDecoder(FairseqLanguageModel):
     def __init__(self, decoder, interface):
         super().__init__(decoder)
         self.interface = interface
-        self.bpe_end = []
+        self.bpe_ends = np.array([not self.decoder.dictionary.symbols[i].endswith('@@') for i in range(len(self.decoder.dictionary.symbols))])
 
     @classmethod
     def build_model(cls, args, task):
@@ -285,10 +286,9 @@ class CLDecoder(FairseqLanguageModel):
             args, task.target_dictionary, embed_tokens, no_encoder_attn=False
         )
 
-        interface = cls.build_embedding(
-                args, task.source_dictionary, args.decoder_input_dim
-            )
-        interface.load_state_dict(torch.load("/root/khang/checkpoints/emb.pt"))
+        interface = Embedding(len(task.source_dictionary), args.decoder_input_dim, padding_idx=task.source_dictionary.pad()) 
+        # interface = torch.nn.Linear(args.decoder_input_dim, len(task.source_dictionary))
+        interface.load_state_dict(torch.load("/root/khang/code/fairseq/checkpoints/80k/init/emb.pt"))
         interface.requires_grad_(False)
         # if args.interface_path:
         #     interface.load_state_dict(torch.load(interface_path))
@@ -304,17 +304,20 @@ class CLDecoder(FairseqLanguageModel):
         """
         Add noise to the encoder input.
         """
-        dico = self.decoder.dictionary.symbols
-        bpe_ends = np.array([not dico[i].endswith('@@') for i in range(len(dico))])
-
-        src_tokens, src_lengths = word_shuffle(bpe_ends, src_tokens, src_lengths)
-        src_tokens, src_lengths = word_dropout(dico, bpe_ends, src_tokens, src_lengths)
+        src_tokens = word_shuffle(self.bpe_ends, src_tokens, src_lengths)
+        # src_tokens, src_lengths = word_dropout(dico, bpe_ends, src_tokens, src_lengths)
         return src_tokens, src_lengths
 
 
     def forward(self, src_tokens, **kwargs):
-        # noisy_sample = self.add_noise(src_tokens, src_lengths)
-        encoder_out = self.interface(src_tokens)
+        assert "src_lengths" in kwargs.keys()
+        
+        if np.random.rand() > 0.5:
+            noisy_sample, _ = self.add_noise(src_tokens, kwargs['src_lengths'])
+            encoder_out = self.interface(noisy_sample)
+        else:
+            encoder_out = self.interface(src_tokens)
+        
         # B x T x C -> T x B x C
         encoder_out = encoder_out.transpose(0, 1)
         encoder_out = {
@@ -323,34 +326,44 @@ class CLDecoder(FairseqLanguageModel):
         }
         return self.decoder(src_tokens, encoder_out)
 
-def word_shuffle(bpe_ends, x, l, word_shuffle=3):
+def word_shuffle(bpe_ends, x, l, shuffle=3):
     """
     Randomly shuffle input words.
     """
-    if word_shuffle == 0:
-        return x, l
-    from IPython import embed
-    print("In word_shuffle")
-    embed()
-    # define noise word scores
-    noise = np.random.uniform(0, word_shuffle, size=(x.size(0) - 1, x.size(1)))
-    noise[0] = -1  # do not move start sentence symbol
+    try:
+        if shuffle == 0:
+            return x, l
 
-    # be sure to shuffle entire words
-    bpe_end = bpe_ends[x]
-    word_idx = bpe_end[::-1].cumsum(0)[::-1]
-    word_idx = word_idx.max(0)[None, :] - word_idx
+        x_cpu = x.cpu().numpy()
+        l = l.cpu().numpy()
 
-    assert word_shuffle > 1
-    x2 = x.clone()
-    for i in range(l.size(0)):
-        # generate a random permutation
-        scores = word_idx[:l[i] - 1, i] + noise[word_idx[:l[i] - 1, i], i]
-        scores += 1e-6 * np.arange(l[i] - 1)  # ensure no reordering inside a word
-        permutation = scores.argsort()
-        # shuffle words
-        x2[:l[i] - 1, i].copy_(x2[:l[i] - 1, i][torch.from_numpy(permutation)])
-    return x2, l
+        # define noise word scores
+        noise = np.random.uniform(0, shuffle, size=(x.size(0), x.size(1)))
+        # noise[0] = -1  # do not move start sentence symbol
+        noise[x_cpu<4] = -1
+
+        # be sure to shuffle entire words
+        bpe_end = bpe_ends[x_cpu]
+        word_idx = bpe_end[::-1].cumsum(0)[::-1]
+        word_idx = word_idx.max(1)[:, None] - word_idx
+        # from IPython import embed
+        # print("In word_shuffle")
+        # embed()
+        assert shuffle > 1
+        x2 = x.clone()
+        for i in range(l.shape[0]):
+            if l[i] != word_idx.shape[-1]:
+                continue
+            # generate a random permutation
+            scores = word_idx[i] + noise[i, word_idx[i]]
+            scores += 1e-6 * np.arange(l[i])  # ensure no reordering inside a word
+            permutation = scores.argsort()
+            # shuffle words
+            x2[i].copy_(x2[i][torch.from_numpy(permutation)])
+    except Exception as e:
+        from IPython import embed
+        embed()
+    return x2
 
 def word_dropout(dictionary, bpe_ends, x, l, word_dropout=.1):
     """
@@ -361,7 +374,7 @@ def word_dropout(dictionary, bpe_ends, x, l, word_dropout=.1):
     assert 0 < word_dropout < 1
 
     # define words to drop
-    bos_index = bos_index[lang_id]
+    bos_index = dictionary.bos()
     keep = np.random.rand(x.size(0) - 1, x.size(1)) >= word_dropout
     keep[0] = 1  # do not drop the start sentence symbol
 
@@ -466,7 +479,11 @@ def base_lm_architecture(args):
 
 
 @register_model_architecture("cl_decoder", "cl_decoder_base")
-def transformer_lm_big(args):
+def cl_decoder_base(args):
+    args.share_decoder_input_output_embed = safe_getattr(
+        args, "share_decoder_input_output_embed", True
+    )
+    args.activation_fn = safe_getattr(args, "activation_fn", "gelu")
     args.decoder_layers = safe_getattr(args, "decoder_layers", 6)
     args.decoder_embed_dim = safe_getattr(args, "decoder_embed_dim", 1024)
     args.decoder_ffn_embed_dim = safe_getattr(args, "decoder_ffn_embed_dim", 4096)

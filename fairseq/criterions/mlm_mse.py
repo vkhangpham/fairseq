@@ -91,9 +91,8 @@ class MLM_MSELoss(FairseqCriterion):
             # lm_targets = lm_targets.view(-1)
             # lm_loss = compute_cross_entropy_loss(lm_logits, lm_targets, self.padding_idx)
 
-
             masked_tokens = sample["lm_target"].ne(self.padding_idx)
-            sample_size = masked_tokens.int().sum()
+            # sample_size = masked_tokens.int().sum()
             if masked_tokens.device == torch.device("cpu"):
                 if not masked_tokens.any():
                     masked_tokens = None
@@ -108,7 +107,10 @@ class MLM_MSELoss(FairseqCriterion):
             targets = sample["lm_target"]
             if masked_tokens is not None:
                 targets = targets[masked_tokens]
-
+            # compute the number of tokens for which loss is computed. This is used
+            # to normalize the loss
+            # ntokens = utils.strip_pad(targets, self.padding_idx).numel()
+            ntokens = masked_tokens.int().sum()
             lm_loss = modules.cross_entropy(
                 logits.view(-1, logits.size(-1)),
                 targets.view(-1),
@@ -122,71 +124,32 @@ class MLM_MSELoss(FairseqCriterion):
 
             # Get final hidden embeddings (before LN)
             final_hidden = output[1]['final_hidden']
-            final_hidden = final_hidden.reshape(-1, final_hidden.size(-1))
-            final_hidden = final_hidden[torch.flatten(masked_tokens)]
+            # final_hidden = final_hidden.reshape(-1, final_hidden.size(-1))
+            # final_hidden = final_hidden[masked_tokens]
 
             # Calculate MSE loss between linear weights and final hidden embeddings
             mse_loss = F.mse_loss(
                 final_hidden,
                 linear_weights,
-                reduction='mean'
+                reduction='none'
             )
-
-            # compute the number of tokens for which loss is computed. This is used
-            # to normalize the loss
-            ntokens = utils.strip_pad(targets, self.padding_idx).numel()
-            loss = (lm_loss)/sample_size + mse_loss
+            mse_loss = mse_loss.mean(-1).sum()
+            # mse_loss = mse_loss / ntokens
+            # mse_loss.data = mse_loss.data * ntokens
+            loss = lm_loss/ntokens + mse_loss 
             nsentences = sample["nsentences"]
-            # nsentences = 0
-
-            # print("\n======\n")
-            # torch.set_printoptions(profile="full")
-            # print(mse_loss)
-            # print(lm_loss, ntokens, lm_loss/ntokens)
-            # print(loss)
-
-            # Compute sentence loss if masked_lm_only is False
-            sentence_loss = None
-            if not self.masked_lm_only:
-                sentence_logits = output_metadata["sentence_logits"]
-                sentence_targets = sample["sentence_target"].view(-1)
-                # This needs to be recomputed due to some differences between
-                # TokenBlock and BlockPair dataset. This can be resolved with a
-                # refactor of BERTModel which we will do in the future.
-                # TODO: Remove this after refactor of BERTModel
-                nsentences = sentence_targets.size(0)
-
-                # Check for logits being none which can happen when remove_heads
-                # is set to true in the BERT model. Ideally we should set
-                # masked_lm_only to true in this case, but that requires some
-                # refactor in the BERT model.
-                if sentence_logits is not None:
-                    sentence_loss = compute_cross_entropy_loss(
-                        sentence_logits, sentence_targets
-                    )
-
-                    loss += self.nsp_loss_weight * (sentence_loss / nsentences)
-
-            # NOTE: as we are summing up per token mlm loss and per sentence nsp loss
-            # we don't need to use sample_size as denominator for the gradient
-            # here sample_size is just used for logging
-            sample_size = 1
+            sample_size = ntokens
             logging_output = {
                 "loss": utils.item(loss.data) if reduce else loss.data,
                 "lm_loss": utils.item(lm_loss.data) if reduce else lm_loss.data,
                 "mse_loss": mse_loss.data,
                 # sentence loss is not always computed
-                "sentence_loss": (
-                    (utils.item(sentence_loss.data) if reduce else sentence_loss.data)
-                    if sentence_loss is not None
-                    else 0.0
-                ),
+                "sentence_loss": 0.0,
                 "ntokens": ntokens,
                 "nsentences": nsentences,
                 "sample_size": sample_size,
             }
-            # from IPython import embed;
-            # embed()
+            # from IPython import embed; embed()
             return loss, sample_size, logging_output
         except Exception as e:
             import os

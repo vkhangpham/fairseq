@@ -224,18 +224,23 @@ class MaskedLMEncoder(FairseqEncoder):
         self.layer_norm = LayerNorm(args.encoder_embed_dim)
 
         self.lm_output_learned_bias = None
-        if self.load_softmax:
-            self.lm_output_learned_bias = nn.Parameter(torch.zeros(self.vocab_size))
-
-            if not self.share_input_output_embed:
-                self.embed_out = nn.Linear(
-                    args.encoder_embed_dim, self.vocab_size, bias=True
+        self.embed_out = nn.Linear(
+                    args.encoder_embed_dim, self.vocab_size, bias=False
                 )
+        self.embed_out.load_state_dict(torch.load("/root/khang/code/fairseq/checkpoints/mlm_ende_emb.pt"))
+        # if self.load_softmax:
+        #     self.lm_output_learned_bias = nn.Parameter(torch.zeros(self.vocab_size))
 
-            if args.sent_loss:
-                self.sentence_projection_layer = nn.Linear(
-                    args.encoder_embed_dim, self.sentence_out_dim, bias=False
-                )
+        #     if not self.share_input_output_embed:
+        #         self.embed_out = nn.Linear(
+        #             args.encoder_embed_dim, self.vocab_size, bias=True
+        #         )
+        #         self.embed_out.load_state_dict(torch.load("/root/khang/code/fairseq/checkpoints/mlm_ende_emb.pt"))
+
+        #     if args.sent_loss:
+        #         self.sentence_projection_layer = nn.Linear(
+        #             args.encoder_embed_dim, self.sentence_out_dim, bias=False
+        #         )
 
     def forward(self, src_tokens, segment_labels=None, masked_tokens=None, **unused):
         """
@@ -267,14 +272,14 @@ class MaskedLMEncoder(FairseqEncoder):
             )
             x = inner_states[-1].transpose(0, 1)
 
-            # store final hidden before layernorm to calculate MSE loss
-            final_hidden = x.clone()
-
             # project masked tokens only
             if masked_tokens is not None:
                 x = x[masked_tokens, :]
 
-            x = self.layer_norm(self.activation_fn(self.lm_head_transform_weight(x)))
+            x = self.activation_fn(self.lm_head_transform_weight(x))
+            # store final hidden before layernorm to calculate MSE loss
+            final_hidden = x.clone()
+            x = self.layer_norm(x)
             pooled_output = self.pooler_activation(self.masked_lm_pooler(sentence_rep))
 
             # project back to size of vocabulary
