@@ -109,12 +109,12 @@ done
 
 #echo "learn_bpe.py on ${TRAIN}..."
 #python $BPEROOT/learn_bpe.py -s $BPE_TOKENS < $TRAIN > $BPE_CODE
-cp /root/khang/code/XLM/data/processed/tmp/codes $prep/code
+CODES=/root/khang/code/fairseq/data-bin/80k/tokenized
 
 for L in $src $tgt; do
     for f in train.$L valid.$L test.$L; do
         echo "applybpe.py to ${f}..."
-	fastBPE/fast applybpe $prep/$f $tmp/$f $prep/code
+	    $FASTBPE applybpe $prep/$f $tmp/$f $CODES/codes &
         #python $BPEROOT/apply_bpe.py -c $KDATA/codes --vocabulary $KDATA/dict.$L.txt < $tmp/$f > $prep/$f
     done
 done
