@@ -102,6 +102,7 @@ class TransformerSentenceEncoder(nn.Module):
         traceable: bool = False,
         q_noise: float = 0.0,
         qn_block_size: int = 8,
+        resdrop_layer=-1,
     ) -> None:
 
         super().__init__()
@@ -123,6 +124,7 @@ class TransformerSentenceEncoder(nn.Module):
             self.vocab_size, self.embedding_dim, self.padding_idx
         )
         self.embed_scale = embed_scale
+        self.resdrop_layer = resdrop_layer
 
         if q_noise > 0:
             self.quant_noise = apply_quant_noise_(
@@ -273,9 +275,12 @@ class TransformerSentenceEncoder(nn.Module):
         if not last_state_only:
             inner_states.append(x)
 
-        for layer in self.layers:
+        for idx, layer in enumerate(self.layers):
             x, _ = layer(
-                x, self_attn_padding_mask=padding_mask, self_attn_mask=attn_mask
+                x, 
+                self_attn_padding_mask=padding_mask, 
+                self_attn_mask=attn_mask, 
+                drop=(idx == self.resdrop_layer)
             )
             if not last_state_only:
                 inner_states.append(x)
