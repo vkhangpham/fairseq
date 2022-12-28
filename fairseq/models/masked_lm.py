@@ -146,6 +146,22 @@ class MaskedLMModel(FairseqEncoderModel):
             help="apply layernorm before each encoder block",
         )
 
+        # Arguments related to pre-trained linear weights (to use with CL Encoder)
+        parser.add_argument(
+            "--pretrained-emb-out",
+            type=str,
+            help="path to pre-trained embedding file.",
+        )
+
+        # Arguments related to PDE
+        parser.add_argument(
+            "--resdrop-layer",
+            type=int,
+            metavar="N",
+            help="which encoder layer to remove the residual connection after self-attention. (positional disengled encoder)",
+            default=-1,
+        )
+
     def forward(self, src_tokens, segment_labels=None, **kwargs):
         try:
             return self.encoder(src_tokens, segment_labels=segment_labels, **kwargs)
@@ -201,6 +217,7 @@ class MaskedLMEncoder(FairseqEncoder):
             apply_bert_init=args.apply_bert_init,
             activation_fn=args.activation_fn,
             learned_pos_embedding=args.encoder_learned_pos,
+            resdrop_layer=args.resdrop_layer,
         )
 
         self.share_input_output_embed = args.share_encoder_input_output_embed
@@ -227,20 +244,21 @@ class MaskedLMEncoder(FairseqEncoder):
         self.embed_out = nn.Linear(
                     args.encoder_embed_dim, self.vocab_size, bias=False
                 )
-        self.embed_out.load_state_dict(torch.load("/root/khang/code/fairseq/checkpoints/mlm_ende_emb.pt"))
-        # if self.load_softmax:
-        #     self.lm_output_learned_bias = nn.Parameter(torch.zeros(self.vocab_size))
 
-        #     if not self.share_input_output_embed:
-        #         self.embed_out = nn.Linear(
-        #             args.encoder_embed_dim, self.vocab_size, bias=True
-        #         )
-        #         self.embed_out.load_state_dict(torch.load("/root/khang/code/fairseq/checkpoints/mlm_ende_emb.pt"))
+        if self.load_softmax:
+            self.lm_output_learned_bias = nn.Parameter(torch.zeros(self.vocab_size))
 
-        #     if args.sent_loss:
-        #         self.sentence_projection_layer = nn.Linear(
-        #             args.encoder_embed_dim, self.sentence_out_dim, bias=False
-        #         )
+        if not self.share_input_output_embed:
+            self.embed_out = nn.Linear(
+                args.encoder_embed_dim, self.vocab_size, bias=False
+            )
+            if args.pretrained_emb_out:
+                self.embed_out.load_state_dict(torch.load(args.pretrained_emb_out))
+
+        if args.sent_loss:
+            self.sentence_projection_layer = nn.Linear(
+                args.encoder_embed_dim, self.sentence_out_dim, bias=False
+            )
 
     def forward(self, src_tokens, segment_labels=None, masked_tokens=None, **unused):
         """
@@ -449,10 +467,10 @@ def cl_encoder(args):
     args.apply_bert_init = getattr(args, "apply_bert_init", True)
     base_architecture(args)
 
-@register_model_architecture("masked_lm", "toy")
-def toy(args):
-    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 300)
-    args.max_positions = getattr(args, "max_positions", 64)
+@register_model_architecture("masked_lm", "cl_pde")
+def cl_pde_architecture(args):
+    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 1024)
+    args.max_positions = getattr(args, "max_positions", 128)
 
     args.share_encoder_input_output_embed = getattr(
         args, "share_encoder_input_output_embed", False
@@ -463,9 +481,9 @@ def toy(args):
     args.encoder_learned_pos = getattr(args, "encoder_learned_pos", True)
     args.num_segment = getattr(args, "num_segment", 2)
 
-    args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 1)
-    args.encoder_layers = getattr(args, "encoder_layers", 1)
-    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 256)
+    args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 8)
+    args.encoder_layers = getattr(args, "encoder_layers", 6)
+    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 4096)
 
     args.sent_loss = getattr(args, "sent_loss", False)
 
@@ -473,4 +491,8 @@ def toy(args):
     args.encoder_normalize_before = getattr(args, "encoder_normalize_before", False)
     args.pooler_activation_fn = getattr(args, "pooler_activation_fn", "tanh")
     args.apply_bert_init = getattr(args, "apply_bert_init", True)
+
+    # PDE config
+    args.resdrop_layer = getattr(args, "resdrop_layer", args.encoder_layers-1)
+
     base_architecture(args)
