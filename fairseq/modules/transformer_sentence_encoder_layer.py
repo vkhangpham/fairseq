@@ -111,6 +111,7 @@ class TransformerSentenceEncoderLayer(nn.Module):
         x: torch.Tensor,
         self_attn_mask: Optional[torch.Tensor] = None,
         self_attn_padding_mask: Optional[torch.Tensor] = None,
+        drop: Optional[bool] = False,
     ):
         """
         LayerNorm is applied either before or after the self-attention/ffn
@@ -126,9 +127,10 @@ class TransformerSentenceEncoderLayer(nn.Module):
             attn_mask=self_attn_mask,
         )
         x = self.dropout_module(x)
-        x = residual + x
-        x = self.self_attn_layer_norm(x)
+        if not drop:
+            x = residual + x
 
+        x = self.self_attn_layer_norm(x)
         residual = x
         x = self.activation_fn(self.fc1(x))
         x = self.activation_dropout_module(x)
