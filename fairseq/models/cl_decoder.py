@@ -234,7 +234,10 @@ class CLDecoder(FairseqLanguageModel):
     def __init__(self, decoder, interface):
         super().__init__(decoder)
         self.interface = interface
-        self.bpe_ends = np.array([not self.decoder.dictionary.symbols[i].endswith('@@') for i in range(len(self.decoder.dictionary.symbols))])
+        self.bpe_ends = torch.IntTensor([
+            not self.decoder.dictionary.symbols[i].endswith('@@') 
+            for i in range(len(self.decoder.dictionary.symbols))
+        ])
 
     @classmethod
     def build_model(cls, args, task):
@@ -288,7 +291,7 @@ class CLDecoder(FairseqLanguageModel):
 
         interface = Embedding(len(task.source_dictionary), args.decoder_input_dim, padding_idx=task.source_dictionary.pad()) 
         # interface = torch.nn.Linear(args.decoder_input_dim, len(task.source_dictionary))
-        interface.load_state_dict(torch.load("/root/khang/code/fairseq/checkpoints/80k/init/emb.pt"))
+        interface.load_state_dict(torch.load("/root/khang/code/fairseq/checkpoints/80k_2/decoder/init_embed_out.pt"))
         interface.requires_grad_(False)
         # if args.interface_path:
         #     interface.load_state_dict(torch.load(interface_path))
@@ -305,19 +308,16 @@ class CLDecoder(FairseqLanguageModel):
         Add noise to the encoder input.
         """
         src_tokens = word_shuffle(self.bpe_ends, src_tokens, src_lengths)
-        # src_tokens, src_lengths = word_dropout(dico, bpe_ends, src_tokens, src_lengths)
+        # src_tokens, src_lengths = word_dropout(self.decoder.dictionary, self.bpe_ends, src_tokens, src_lengths)
         return src_tokens, src_lengths
 
 
     def forward(self, src_tokens, **kwargs):
         assert "src_lengths" in kwargs.keys()
-        
-        if np.random.rand() > 0.5:
-            noisy_sample, _ = self.add_noise(src_tokens, kwargs['src_lengths'])
-            encoder_out = self.interface(noisy_sample)
-        else:
-            encoder_out = self.interface(src_tokens)
-        
+
+        noisy_sample, _ = self.add_noise(src_tokens, kwargs['src_lengths'])
+        encoder_out = self.interface(noisy_sample)
+
         # B x T x C -> T x B x C
         encoder_out = encoder_out.transpose(0, 1)
         encoder_out = {
@@ -330,39 +330,33 @@ def word_shuffle(bpe_ends, x, l, shuffle=3):
     """
     Randomly shuffle input words.
     """
-    try:
-        if shuffle == 0:
-            return x, l
+    if shuffle == 0:
+        return x, l
 
-        x_cpu = x.cpu().numpy()
-        l = l.cpu().numpy()
+    x_cpu = x
+    l = l
 
-        # define noise word scores
-        noise = np.random.uniform(0, shuffle, size=(x.size(0), x.size(1)))
-        # noise[0] = -1  # do not move start sentence symbol
-        noise[x_cpu<4] = -1
+    # define noise word scores
+    noise = torch.FloatTensor(x.size(0), x.size(1)).uniform_(0, shuffle)
+    # noise[0] = -1  # do not move start sentence symbol
+    noise[x_cpu<4] = -1
 
-        # be sure to shuffle entire words
-        bpe_end = bpe_ends[x_cpu]
-        word_idx = bpe_end[::-1].cumsum(0)[::-1]
-        word_idx = word_idx.max(1)[:, None] - word_idx
-        # from IPython import embed
-        # print("In word_shuffle")
-        # embed()
-        assert shuffle > 1
-        x2 = x.clone()
-        for i in range(l.shape[0]):
-            if l[i] != word_idx.shape[-1]:
-                continue
-            # generate a random permutation
-            scores = word_idx[i] + noise[i, word_idx[i]]
-            scores += 1e-6 * np.arange(l[i])  # ensure no reordering inside a word
-            permutation = scores.argsort()
-            # shuffle words
-            x2[i].copy_(x2[i][torch.from_numpy(permutation)])
-    except Exception as e:
-        from IPython import embed
-        embed()
+    # be sure to shuffle entire words
+    bpe_end = bpe_ends[x_cpu]
+    word_idx = torch.cumsum(bpe_end.flip(0), dim=0).flip(0)
+    word_idx = torch.max(word_idx, dim=1)[0].unsqueeze(1) - word_idx
+    assert shuffle > 1
+    x2 = x.clone()
+    for i in range(l.size(0)):
+        if l[i] != word_idx.shape[-1]:
+            continue
+        # generate a random permutation
+        scores = word_idx[i] + noise[i, word_idx[i]]
+        scores += 1e-6 * torch.arange(l[i])  # ensure no reordering inside a word
+        permutation = scores.argsort()
+        # shuffle words
+        x2[i].copy_(x2[i][permutation])
+
     return x2
 
 def word_dropout(dictionary, bpe_ends, x, l, word_dropout=.1):
@@ -374,27 +368,32 @@ def word_dropout(dictionary, bpe_ends, x, l, word_dropout=.1):
     assert 0 < word_dropout < 1
 
     # define words to drop
+    x_cpu = x.cpu().numpy()
+    l = l.cpu().numpy()
+
     bos_index = dictionary.bos()
-    keep = np.random.rand(x.size(0) - 1, x.size(1)) >= word_dropout
-    keep[0] = 1  # do not drop the start sentence symbol
+    keep = np.random.rand(x_cpu.size(0), x_cpu.size(1)) >= word_dropout
+    keep[x_cpu<4] = -1  # do not drop special symbol
 
     # be sure to drop entire words
-    bpe_end = bpe_ends[x]
+    bpe_end = bpe_ends[x_cpu]
     word_idx = bpe_end[::-1].cumsum(0)[::-1]
-    word_idx = word_idx.max(0)[None, :] - word_idx
+    word_idx = word_idx.max(1)[:, None] - word_idx
 
     sentences = []
     lengths = []
-    for i in range(l.size(0)):
-        assert x[l[i] - 1, i] == dictionary.eos()
-        words = x[:l[i] - 1, i].tolist()
+    for i in range(l.shape[0]):
+        if l[i] != word_idx.shape[-1]:
+            continue
+        # assert x_cpu[l[i], i] == dictionary.eos()
+        words = x_cpu[:l[i], i].tolist()
         # randomly drop words from the input
         new_s = [w for j, w in enumerate(words) if keep[word_idx[j, i], i]]
         # we need to have at least one word in the sentence (more than the start / end sentence symbols)
         if len(new_s) == 1:
             new_s.append(words[np.random.randint(1, len(words))])
         new_s.append(dictionary.eos())
-        assert len(new_s) >= 3 and new_s[0] == bos_index and new_s[-1] == dictionary.eos()
+        # assert len(new_s) >= 3 and new_s[0] == bos_index and new_s[-1] == dictionary.eos()
         sentences.append(new_s)
         lengths.append(len(new_s))
     # re-construct input
@@ -420,7 +419,7 @@ def base_lm_architecture(args):
 
     args.encoder_embed_dim = safe_getattr(args, "encoder_embed_dim", 1024)
     args.decoder_embed_dim = safe_getattr(args, "decoder_embed_dim", 1024)
-    args.decoder_ffn_embed_dim = safe_getattr(args, "decoder_ffn_embed_dim", 4096)
+    args.decoder_ffn_embed_dim = safe_getattr(args, "decoder_ffn_embed_dim", 2048)
     args.decoder_layers = safe_getattr(args, "decoder_layers", 6)
     args.decoder_attention_heads = safe_getattr(args, "decoder_attention_heads", 8)
     args.adaptive_softmax_cutoff = safe_getattr(args, "adaptive_softmax_cutoff", None)
