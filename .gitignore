@@ -143,3 +143,7 @@ outputs
 # Data and cp
 data-bin/
 checkpoints/
+examples/
+
+# init script
+init*
