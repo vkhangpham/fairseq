@@ -222,6 +222,12 @@ class CLDecoderConfig(FairseqDataclass):
         },
     )
 
+    # CL Encoder
+    semface_path: Optional[str] = field(
+        default=None,
+        metadata={"help": "path to trained semantic interface"},
+    )
+
     # options from other parts of the config
     add_bos_token: bool = II("task.add_bos_token")
     tokens_per_sample: int = II("task.tokens_per_sample")
@@ -234,7 +240,12 @@ class CLDecoder(FairseqLanguageModel):
     def __init__(self, decoder, interface):
         super().__init__(decoder)
         self.interface = interface
-        self.bpe_ends = np.array([not self.decoder.dictionary.symbols[i].endswith('@@') for i in range(len(self.decoder.dictionary.symbols))])
+        self.bpe_ends = torch.BoolTensor(
+            [
+                not self.decoder.dictionary.symbols[i].endswith('@@') 
+                for i in range(len(self.decoder.dictionary.symbols))
+            ]
+        )
 
     @classmethod
     def build_model(cls, args, task):
@@ -287,11 +298,8 @@ class CLDecoder(FairseqLanguageModel):
         )
 
         interface = Embedding(len(task.source_dictionary), args.decoder_input_dim, padding_idx=task.source_dictionary.pad()) 
-        # interface = torch.nn.Linear(args.decoder_input_dim, len(task.source_dictionary))
-        interface.load_state_dict(torch.load("/root/khang/code/fairseq/checkpoints/80k/init/emb.pt"))
+        interface.load_state_dict(torch.load(args.semface_path))
         interface.requires_grad_(False)
-        # if args.interface_path:
-        #     interface.load_state_dict(torch.load(interface_path))
 
         return cls(decoder, interface)
 
@@ -300,24 +308,12 @@ class CLDecoder(FairseqLanguageModel):
         embed_tokens = Embedding(len(dictionary), embed_dim, dictionary.pad())
         return embed_tokens
 
-    def add_noise(self, src_tokens, src_lengths):
-        """
-        Add noise to the encoder input.
-        """
-        src_tokens = word_shuffle(self.bpe_ends, src_tokens, src_lengths)
-        # src_tokens, src_lengths = word_dropout(dico, bpe_ends, src_tokens, src_lengths)
-        return src_tokens, src_lengths
-
-
     def forward(self, src_tokens, **kwargs):
         assert "src_lengths" in kwargs.keys()
-        
-        if np.random.rand() > 0.5:
-            noisy_sample, _ = self.add_noise(src_tokens, kwargs['src_lengths'])
-            encoder_out = self.interface(noisy_sample)
-        else:
-            encoder_out = self.interface(src_tokens)
-        
+
+        noisy_sample, _ = self.add_noise(src_tokens, kwargs['src_lengths'])
+        encoder_out = self.interface(noisy_sample)
+
         # B x T x C -> T x B x C
         encoder_out = encoder_out.transpose(0, 1)
         encoder_out = {
@@ -325,6 +321,15 @@ class CLDecoder(FairseqLanguageModel):
             "encoder_padding_mask": [src_tokens.eq(self.decoder.padding_idx)]
         }
         return self.decoder(src_tokens, encoder_out)
+
+        
+    def add_noise(self, src_tokens, src_lengths):
+        """
+        Add noise to the encoder input.
+        """
+        src_tokens = word_shuffle(self.bpe_ends, src_tokens, src_lengths)
+        # src_tokens, src_lengths = word_dropout_torch(self.decoder.dictionary, self.bpe_ends, src_tokens, src_lengths)
+        return src_tokens, src_lengths
 
 def word_shuffle(bpe_ends, x, l, shuffle=3):
     """
@@ -334,74 +339,84 @@ def word_shuffle(bpe_ends, x, l, shuffle=3):
         if shuffle == 0:
             return x, l
 
-        x_cpu = x.cpu().numpy()
-        l = l.cpu().numpy()
-
+        device = x.device
         # define noise word scores
-        noise = np.random.uniform(0, shuffle, size=(x.size(0), x.size(1)))
+        noise = shuffle * torch.rand(x.size(0), x.size(1), device=device)
         # noise[0] = -1  # do not move start sentence symbol
-        noise[x_cpu<4] = -1
+        noise[x<4] = -1
 
-        # be sure to shuffle entire words
-        bpe_end = bpe_ends[x_cpu]
-        word_idx = bpe_end[::-1].cumsum(0)[::-1]
-        word_idx = word_idx.max(1)[:, None] - word_idx
-        # from IPython import embed
-        # print("In word_shuffle")
-        # embed()
+        # be sure to shuffle entire word
+        bpe_end = bpe_ends.to(device)[x]
+        word_idx = bpe_end.flip(1).cumsum(1).flip(1)
+        word_idx = word_idx.max() - word_idx
+
         assert shuffle > 1
         x2 = x.clone()
-        for i in range(l.shape[0]):
-            if l[i] != word_idx.shape[-1]:
+        for i in range(l.size(0)):
+            if l[i] != word_idx.size(-1):
                 continue
             # generate a random permutation
             scores = word_idx[i] + noise[i, word_idx[i]]
-            scores += 1e-6 * np.arange(l[i])  # ensure no reordering inside a word
+            scores += 1e-6 * torch.arange(l[i], device=device)  # ensure no reordering inside a word
             permutation = scores.argsort()
+
             # shuffle words
-            x2[i].copy_(x2[i][torch.from_numpy(permutation)])
+            x2[i] = x[i][permutation]
+        return x2
     except Exception as e:
         from IPython import embed
+        print("In word shuffle torch")
+        print("Error: ", e)
         embed()
-    return x2
 
-def word_dropout(dictionary, bpe_ends, x, l, word_dropout=.1):
+def word_dropout_torch(dictionary, bpe_ends, x, l, word_dropout=.1):
     """
     Randomly drop input words.
     """
-    if word_dropout == 0:
-        return x, l
-    assert 0 < word_dropout < 1
+    try:
+        if word_dropout == 0:
+            return x, l
+        assert 0 < word_dropout < 1
 
-    # define words to drop
-    bos_index = dictionary.bos()
-    keep = np.random.rand(x.size(0) - 1, x.size(1)) >= word_dropout
-    keep[0] = 1  # do not drop the start sentence symbol
+        device = x.device
+        # define words to drop
+        bos_index = dictionary.bos()
+        keep = torch.rand(x.size(0), x.size(1), device=device) >= word_dropout
+        keep[x<4] = 1  # do not drop the special symbol
 
-    # be sure to drop entire words
-    bpe_end = bpe_ends[x]
-    word_idx = bpe_end[::-1].cumsum(0)[::-1]
-    word_idx = word_idx.max(0)[None, :] - word_idx
+        # be sure to shuffle entire word
+        bpe_end = bpe_ends.to(device)[x]
+        word_idx = bpe_end.flip(1).cumsum(1).flip(1)
+        word_idx = word_idx.max() - word_idx
 
-    sentences = []
-    lengths = []
-    for i in range(l.size(0)):
-        assert x[l[i] - 1, i] == dictionary.eos()
-        words = x[:l[i] - 1, i].tolist()
-        # randomly drop words from the input
-        new_s = [w for j, w in enumerate(words) if keep[word_idx[j, i], i]]
-        # we need to have at least one word in the sentence (more than the start / end sentence symbols)
-        if len(new_s) == 1:
-            new_s.append(words[np.random.randint(1, len(words))])
-        new_s.append(dictionary.eos())
-        assert len(new_s) >= 3 and new_s[0] == bos_index and new_s[-1] == dictionary.eos()
-        sentences.append(new_s)
-        lengths.append(len(new_s))
-    # re-construct input
-    l2 = torch.LongTensor(lengths)
-    x2 = torch.LongTensor(l2.max(), l2.size(0)).fill_(dictionary.pad())
-    for i in range(l2.size(0)):
-        x2[:l2[i], i].copy_(torch.LongTensor(sentences[i]))
+        sentences = []
+        lengths = []
+        for i in range(l.size(0)):
+            assert x[i, l[i] - 1] == dictionary.eos()
+            words = x[i, :l[i] - 1].tolist()
+            # randomly drop words from the input
+            new_s = [w for j, w in enumerate(words) if keep[word_idx[j, i], i]]
+            # we need to have at least one word in the sentence (more than the start / end sentence symbols)
+            if len(new_s) == 1:
+                new_s.append(words[np.random.randint(1, len(words))])
+            new_s.append(dictionary.eos())
+
+            # sanity check
+            assert len(new_s) >= 3 and new_s[0] == bos_index and new_s[-1] == dictionary.eos()
+
+            sentences.append(new_s)
+            lengths.append(len(new_s))
+
+        # re-construct input
+        l2 = torch.LongTensor(lengths)
+        x2 = torch.LongTensor(l2.max(), l2.size(0)).fill_(dictionary.pad())
+        for i in range(l2.size(0)):
+            x2[:l2[i], i].copy_(torch.LongTensor(sentences[i]))
+    except Exception as e:
+        from IPython import embed
+        print("In word dropout torch")
+        print("Error: ", e)
+        embed()
     return x2, l2
 
 def base_lm_architecture(args):
@@ -488,4 +503,16 @@ def cl_decoder_base(args):
     args.decoder_embed_dim = safe_getattr(args, "decoder_embed_dim", 1024)
     args.decoder_ffn_embed_dim = safe_getattr(args, "decoder_ffn_embed_dim", 4096)
     args.decoder_attention_heads = safe_getattr(args, "decoder_attention_heads", 8)
+    base_lm_architecture(args)
+
+@register_model_architecture("cl_decoder", "cl_decoder_toy")
+def cl_decoder_base(args):
+    args.share_decoder_input_output_embed = safe_getattr(
+        args, "share_decoder_input_output_embed", True
+    )
+    args.activation_fn = safe_getattr(args, "activation_fn", "gelu")
+    args.decoder_layers = safe_getattr(args, "decoder_layers", 1)
+    args.decoder_embed_dim = safe_getattr(args, "decoder_embed_dim", 10)
+    args.decoder_ffn_embed_dim = safe_getattr(args, "decoder_ffn_embed_dim", 10)
+    args.decoder_attention_heads = safe_getattr(args, "decoder_attention_heads", 1)
     base_lm_architecture(args)
