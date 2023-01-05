@@ -106,6 +106,12 @@ class LanguageModelingConfig(FairseqDataclass):
     use_plasma_view: bool = II("common.use_plasma_view")
     plasma_path: str = II("common.plasma_path")
 
+    # CL Decoder
+    use_masked_dict: Optional[bool] = field(
+        default=False,
+        metadata={"help": "use MaskedLMDictionary instead of Dictionary."},
+    )
+
 
 @register_task("language_modeling", dataclass=LanguageModelingConfig)
 class LanguageModelingTask(LegacyFairseqTask):
@@ -153,7 +159,10 @@ class LanguageModelingTask(LegacyFairseqTask):
         if args.data:
             paths = utils.split_paths(args.data)
             assert len(paths) > 0
-            dictionary = Dictionary.load(os.path.join(paths[0], "dict.txt"))
+            if args.use_masked_dict:
+                dictionary = MaskedLMDictionary.load(os.path.join(paths[0], "dict.txt"))
+            else:
+                dictionary = Dictionary.load(os.path.join(paths[0], "dict.txt"))
             logger.info("dictionary: {} types".format(len(dictionary)))
             output_dictionary = dictionary
             if args.output_dictionary_size >= 0:
