@@ -237,6 +237,16 @@ class TransformerConfig(FairseqDataclass):
         metadata={"help": "don't add an extra layernorm after the last decoder block"},
     )
 
+    # freeze embeddings
+    freeze_decoder_embed: bool = field(
+        default=False,
+        metadata={"help": "freeze decoder embedding layer."},
+    )
+    freeze_encoder_embed: bool = field(
+        default=False,
+        metadata={"help": "freeze encoder input embedding layer."},
+    )
+
     # We need to make this hierarchical dataclass like the flat namespace
     # __getattr__ and __setattr__ here allow backward compatibility
     # for subclasses of Transformer(Legacy) that depend on read/write on

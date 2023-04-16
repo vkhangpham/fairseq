@@ -33,7 +33,7 @@ class MeteorScorer(BaseScorer):
 
     def score(self, order=4):
         self.scores = [
-            self.nltk.translate.meteor_score.single_meteor_score(r, p)
+            self.nltk.translate.meteor_score.single_meteor_score(r.split(), p.split())
             for r, p in zip(self.ref, self.pred)
         ]
         return np.mean(self.scores)

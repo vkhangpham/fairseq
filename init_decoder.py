@@ -30,3 +30,13 @@ x = encoder.weight.data
 x = torch.cat((x[:4,:], x[5:, :]))
 decoder.output_projection.weight.data = torch.nn.Parameter(x)
 os.path.join
+
+from fairseq.models.masked_lm import MaskedLMModel
+import torch
+enc_model = MaskedLMModel.from_pretrained(
+    "checkpoints/10M/encoder",
+    "checkpoint_best.pt",
+    "data/de2en/bin/10M/encoder"
+)
+emb = enc_model.get_submodule('models.0.encoder.embed_out')
+torch.save(emb.state_dict(), 'checkpoints/10M/semface.pt')

@@ -39,6 +39,8 @@ class SequenceGenerator(nn.Module):
         lm_model=None,
         lm_weight=1.0,
         tokens_to_suppress=(),
+        cp_alpha=1.0,
+        tgt_dict_path="",
     ):
         """Generates translations of a given source sentence.
 
@@ -110,6 +112,9 @@ class SequenceGenerator(nn.Module):
             self.repeat_ngram_blocker = NGramRepeatBlock(no_repeat_ngram_size)
         else:
             self.repeat_ngram_blocker = None
+
+        self.cp_alpha = cp_alpha
+        self.punc_list = self.get_punc_list(tgt_dict_path)
 
         assert temperature > 0, "--temperature must be greater than 0"
 
@@ -354,6 +359,10 @@ class SequenceGenerator(nn.Module):
                 encoder_outs = self.model.reorder_encoder_out(
                     encoder_outs, reorder_state
                 )
+
+            # set copying penalty and punc list
+            cp = {'alpha': self.cp_alpha, 'punc_list': self.punc_list}
+
             with torch.autograd.profiler.record_function(
                 "EnsembleModel: forward_decoder"
             ):
@@ -592,6 +601,25 @@ class SequenceGenerator(nn.Module):
                 List[Dict[str, Tensor]], finalized[sent]
             )
         return finalized
+
+    def get_punc_list(self, path):
+        if not path:
+            return []
+        punctuation_chars =  [
+            chr(i) for i in range(sys.maxunicode)
+            if category(chr(i)).startswith("P")
+        ]
+
+        punc_list=[0,1,2,3]
+        loc=4
+        with open(path,'r') as dict:
+            for line in dict:
+                tmp = line.split()[0]
+                if len(tmp)==1 and tmp in punctuation_chars:
+                    punc_list.append(loc)
+                loc+=1
+
+        return punc_list
 
     def _prefix_tokens(
         self, step: int, lprobs, scores, tokens, prefix_tokens, beam_size: int

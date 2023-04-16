@@ -1024,6 +1024,15 @@ class GenerationConfig(FairseqDataclass):
         default=None,
         metadata={"help": "EOS token"},
     )
+    # arguments for copying penalty
+    copypen: Optional[float] = field(
+        default=1.0,
+        metadata={"help": "Copying penalty: <1.0 favors copying source tokens, >1.0 favors translating source tokens"}
+    )
+    target_dictionary_path: Optional[str] = field(
+        default=None,
+        metadata={"help": "path to target side dictionary, to obtain punctuation list"}
+    )
 
 
 @dataclass

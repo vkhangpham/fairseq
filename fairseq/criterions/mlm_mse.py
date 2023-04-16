@@ -136,7 +136,7 @@ class MLM_MSELoss(FairseqCriterion):
             mse_loss = mse_loss.mean(-1).sum()
             # mse_loss = mse_loss / ntokens
             # mse_loss.data = mse_loss.data * ntokens
-            loss = lm_loss/ntokens + mse_loss 
+            loss = (lm_loss+ mse_loss)/ntokens
             nsentences = sample["nsentences"]
             sample_size = ntokens
             logging_output = {

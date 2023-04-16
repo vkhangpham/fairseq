@@ -103,6 +103,7 @@ class TransformerSentenceEncoder(nn.Module):
         q_noise: float = 0.0,
         qn_block_size: int = 8,
         resdrop_layer=-1,
+        use_rope=False
     ) -> None:
 
         super().__init__()
@@ -174,6 +175,7 @@ class TransformerSentenceEncoder(nn.Module):
                     export=export,
                     q_noise=q_noise,
                     qn_block_size=qn_block_size,
+                    use_rope=use_rope
                 )
                 for _ in range(num_encoder_layers)
             ]
@@ -212,6 +214,7 @@ class TransformerSentenceEncoder(nn.Module):
         export,
         q_noise,
         qn_block_size,
+        use_rope
     ):
         return TransformerSentenceEncoderLayer(
             embedding_dim=embedding_dim,
@@ -224,6 +227,7 @@ class TransformerSentenceEncoder(nn.Module):
             export=export,
             q_noise=q_noise,
             qn_block_size=qn_block_size,
+            use_rope=use_rope
         )
 
     def forward(
@@ -280,7 +284,7 @@ class TransformerSentenceEncoder(nn.Module):
                 x, 
                 self_attn_padding_mask=padding_mask, 
                 self_attn_mask=attn_mask, 
-                drop=(idx == self.resdrop_layer)
+                drop=(idx == self.resdrop_layer)  # check for resdrop layer (PDE)
             )
             if not last_state_only:
                 inner_states.append(x)

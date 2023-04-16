@@ -24,6 +24,7 @@ from fairseq.modules.fairseq_dropout import FairseqDropout
 from fairseq.modules.quant_noise import quant_noise
 from fairseq.models.fairseq_incremental_decoder import FairseqIncrementalDecoder
 
+from fairseq.modules.rotary_positional_embedding import RotaryPositionalEmbedding, apply_rotary_pos_emb
 
 # TODO: move this into xformers?
 # TODO: uint8 input type should just output a bool
@@ -90,6 +91,7 @@ class MultiheadAttention(FairseqIncrementalDecoder):
         xformers_blocksparse_blocksize: Optional[
             int
         ] = 16,  # This should be part of the config
+        use_rope=False,  # use rotary positional embedding
     ):
         super().__init__(dictionary)
 
@@ -160,6 +162,7 @@ class MultiheadAttention(FairseqIncrementalDecoder):
 
         self.onnx_trace = False
         self.skip_embed_dim_check = False
+        self.use_rope = use_rope
         self.init_incremental_state()
 
     def prepare_for_onnx_export_(self):
@@ -513,6 +516,26 @@ class MultiheadAttention(FairseqIncrementalDecoder):
             if not torch.jit.is_scripting():
                 assert value is not None
                 assert src_len, key_bsz == value.shape[:2]
+
+        # from IPython import embed
+        # embed()
+
+        # if self.use_rope:
+        #     with torch.autocast("cuda"):
+        #         rope_pos_emd = RotaryPositionalEmbedding(dim=self.embed_dim)
+        #         cos, sin = rope_pos_emd(query, src_len)
+
+        #         # extend dim T x B x C -> T x B x 1 x C
+        #         new_query = query.view(query.size(0), query.size(1), 1, query.size(2))
+        #         new_key = key.view(key.size(0), key.size(1), 1, key.size(2))
+
+        #         # apply rope
+        #         new_query, new_key = apply_rotary_pos_emb(new_query, new_key, cos, sin)
+
+        #         # squeeze back to T x B x C
+        #         query = query.squeeze(2)
+        #         key = key.squeeze(2)
+
 
         if (
             not self.onnx_trace

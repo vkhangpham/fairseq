@@ -158,8 +158,15 @@ class MaskedLMModel(FairseqEncoderModel):
             "--resdrop-layer",
             type=int,
             metavar="N",
-            help="which encoder layer to remove the residual connection after self-attention. (positional disengled encoder)",
+            help="which encoder layer to remove the residual connection after self-attention (positional disengled encoder).",
             default=-1,
+        )
+
+        # Arguments related to RoPE
+        parser.add_argument(
+            "--use-rope",
+            action="store_true",
+            help="use rotary positional embedding instead of sinusoid.",
         )
 
     def forward(self, src_tokens, segment_labels=None, **kwargs):
@@ -218,6 +225,7 @@ class MaskedLMEncoder(FairseqEncoder):
             activation_fn=args.activation_fn,
             learned_pos_embedding=args.encoder_learned_pos,
             resdrop_layer=args.resdrop_layer,
+            use_rope=args.use_rope,
         )
 
         self.share_input_output_embed = args.share_encoder_input_output_embed
@@ -252,7 +260,7 @@ class MaskedLMEncoder(FairseqEncoder):
             self.embed_out = nn.Linear(
                 args.encoder_embed_dim, self.vocab_size, bias=False
             )
-            if args.pretrained_emb_out:
+            if getattr(args, "pretrained_emb_out", None) is not None:
                 self.embed_out.load_state_dict(torch.load(args.pretrained_emb_out))
 
         if args.sent_loss:
@@ -296,7 +304,7 @@ class MaskedLMEncoder(FairseqEncoder):
 
             x = self.activation_fn(self.lm_head_transform_weight(x))
             # store final hidden before layernorm to calculate MSE loss
-            final_hidden = x.clone()
+            # final_hidden = x.clone()
             x = self.layer_norm(x)
             pooled_output = self.pooler_activation(self.masked_lm_pooler(sentence_rep))
 
@@ -319,7 +327,7 @@ class MaskedLMEncoder(FairseqEncoder):
                 "inner_states": inner_states,
                 "pooled_output": pooled_output,
                 "sentence_logits": sentence_logits,
-                "final_hidden": final_hidden
+                # "final_hidden": final_hidden
             }
         except Exception as e:
             import os
@@ -438,16 +446,18 @@ def xlm_architecture(args):
     args.encoder_normalize_before = getattr(args, "encoder_normalize_before", False)
     args.pooler_activation_fn = getattr(args, "pooler_activation_fn", "tanh")
     args.apply_bert_init = getattr(args, "apply_bert_init", True)
+
+    args.use_rope = False
     base_architecture(args)
 
 
 @register_model_architecture("masked_lm", "cl_encoder")
 def cl_encoder(args):
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 1024)
-    args.max_positions = getattr(args, "max_positions", 128)
+    args.max_positions = getattr(args, "max_positions", 256)
 
     args.share_encoder_input_output_embed = getattr(
-        args, "share_encoder_input_output_embed", False
+        args, "share_encoder_input_output_embed", True
     )
     args.no_token_positional_embeddings = getattr(
         args, "no_token_positional_embeddings", False
@@ -465,6 +475,10 @@ def cl_encoder(args):
     args.encoder_normalize_before = getattr(args, "encoder_normalize_before", False)
     args.pooler_activation_fn = getattr(args, "pooler_activation_fn", "tanh")
     args.apply_bert_init = getattr(args, "apply_bert_init", True)
+
+    args.resdrop_layer = -1
+    args.use_rope = False
+
     base_architecture(args)
 
 @register_model_architecture("masked_lm", "cl_pde")
@@ -493,6 +507,39 @@ def cl_pde_architecture(args):
     args.apply_bert_init = getattr(args, "apply_bert_init", True)
 
     # PDE config
-    args.resdrop_layer = getattr(args, "resdrop_layer", args.encoder_layers-1)
+    args.resdrop_layer = args.encoder_layers - 1
+
+    # RoPE config
+    args.use_rope = False
+
+    base_architecture(args)
+
+@register_model_architecture("masked_lm", "cl_pde_rope")
+def cl_pde_rope_architecture(args):
+    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 1024)
+    args.max_positions = getattr(args, "max_positions", 128)
+
+    args.share_encoder_input_output_embed = getattr(
+        args, "share_encoder_input_output_embed", False
+    )
+    args.no_token_positional_embeddings = getattr(
+        args, "no_token_positional_embeddings", True
+    )
+    args.encoder_learned_pos = getattr(args, "encoder_learned_pos", True)
+    args.num_segment = getattr(args, "num_segment", 2)
+
+    args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 8)
+    args.encoder_layers = getattr(args, "encoder_layers", 6)
+    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 4096)
+
+    args.sent_loss = getattr(args, "sent_loss", False)
+
+    args.activation_fn = getattr(args, "activation_fn", "gelu")
+    args.encoder_normalize_before = getattr(args, "encoder_normalize_before", False)
+    args.pooler_activation_fn = getattr(args, "pooler_activation_fn", "tanh")
+    args.apply_bert_init = getattr(args, "apply_bert_init", False)
+   
+    # RoPE config
+    args.use_rope = True
 
     base_architecture(args)

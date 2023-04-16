@@ -32,6 +32,7 @@ class TransformerSentenceEncoderLayer(nn.Module):
         q_noise: float = 0.0,
         qn_block_size: int = 8,
         init_fn: Callable = None,
+        use_rope=False
     ) -> None:
         super().__init__()
 
@@ -61,6 +62,7 @@ class TransformerSentenceEncoderLayer(nn.Module):
             self_attention=True,
             q_noise=q_noise,
             qn_block_size=qn_block_size,
+            use_rope=use_rope
         )
 
         # layer norm associated with the self attention layer
@@ -96,6 +98,7 @@ class TransformerSentenceEncoderLayer(nn.Module):
         self_attention,
         q_noise,
         qn_block_size,
+        use_rope=False
     ):
         return MultiheadAttention(
             embed_dim,
@@ -104,6 +107,7 @@ class TransformerSentenceEncoderLayer(nn.Module):
             self_attention=True,
             q_noise=q_noise,
             qn_block_size=qn_block_size,
+            use_rope=use_rope
         )
 
     def forward(
@@ -127,6 +131,8 @@ class TransformerSentenceEncoderLayer(nn.Module):
             attn_mask=self_attn_mask,
         )
         x = self.dropout_module(x)
+
+        # only add residual connection if not specify `drop`
         if not drop:
             x = residual + x
 

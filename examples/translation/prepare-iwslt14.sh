@@ -2,13 +2,11 @@
 #
 # Adapted from https://github.com/facebookresearch/MIXER/blob/master/prepareData.sh
 
-<<com
 echo 'Cloning Moses github repository (for tokenization scripts)...'
 git clone https://github.com/moses-smt/mosesdecoder.git
 
 echo 'Cloning Subword NMT repository (for BPE pre-processing)...'
 git clone https://github.com/rsennrich/subword-nmt.git
-com
 
 SCRIPTS=mosesdecoder/scripts
 TOKENIZER=$SCRIPTS/tokenizer/tokenizer.perl
@@ -109,12 +107,12 @@ done
 
 #echo "learn_bpe.py on ${TRAIN}..."
 #python $BPEROOT/learn_bpe.py -s $BPE_TOKENS < $TRAIN > $BPE_CODE
-CODES=/root/khang/code/fairseq/data-bin/80k/tokenized
+CODES=$KDATA/newscrawl/deen15m/deen.15m.codes
 
 for L in $src $tgt; do
     for f in train.$L valid.$L test.$L; do
-        echo "applybpe.py to ${f}..."
-	    $FASTBPE applybpe $prep/$f $tmp/$f $CODES/codes &
-        #python $BPEROOT/apply_bpe.py -c $KDATA/codes --vocabulary $KDATA/dict.$L.txt < $tmp/$f > $prep/$f
+        echo "fastbpe applybpe.py to ${f}..."
+	    $KFAST applybpe $prep/$f $tmp/$f $CODES &
+        #python $BPEROOT/apply_bpe.py -c $KDATA --vocabulary $KDATA/dict.$L.txt < $tmp/$f > $prep/$f
     done
 done
