@@ -268,7 +268,7 @@ class MaskedLMEncoder(FairseqEncoder):
             self.embed_out = nn.Linear(
                 args.encoder_embed_dim, self.vocab_size, bias=False
             )
-            if getattr(args, "pretrained_emb_out", None) is not None:
+            if args.pretrained_emb_out is not None:
                 self.embed_out.load_state_dict(torch.load(args.pretrained_emb_out))
 
         if args.sent_loss:
@@ -393,6 +393,11 @@ def base_architecture(args):
     args.activation_fn = getattr(args, "activation_fn", "relu")
     args.pooler_activation_fn = getattr(args, "pooler_activation_fn", "tanh")
     args.encoder_normalize_before = getattr(args, "encoder_normalize_before", False)
+
+    args.resdrop_layer =  getattr(args, "resdrop_layer", -1)
+    args.use_rope = getattr(args,' use_rope', False)
+    args.apply_small_emb_init = getattr(args, 'apply_small_emb_init', False)
+    args.pretrained_emb_out =  getattr(args, 'pretrained_emb_out', None)
 
 
 @register_model_architecture("masked_lm", "bert_base")
