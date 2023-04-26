@@ -2,7 +2,7 @@ import torch
 
 
 class RotaryPositionalEmbedding(torch.nn.Module):
-    def __init__(self, dim, base=10000, precision=torch.half):
+    def __init__(self, dim, base=10000, precision=torch.float):
         """Rotary positional embedding
         Reference : https://blog.eleuther.ai/rotary-embeddings/
         Paper: https://arxiv.org/pdf/2104.09864.pdf
