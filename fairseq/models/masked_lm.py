@@ -20,7 +20,7 @@ from fairseq.modules import (
     SinusoidalPositionalEmbedding,
     TransformerSentenceEncoder,
 )
-from fairseq.modules.transformer_sentence_encoder import init_bert_params
+from fairseq.modules.transformer_sentence_encoder import init_bert_params, init_small_emb
 from fairseq.utils import safe_hasattr
 
 logger = logging.getLogger(__name__)
@@ -42,6 +42,8 @@ class MaskedLMModel(FairseqEncoderModel):
         # and projection layers are also correctly initialized
         if getattr(args, "apply_bert_init", False):
             self.apply(init_bert_params)
+        if getattr(args, "apply_small_emb_init", False):
+            self.apply(init_small_emb)
 
     @staticmethod
     def add_args(parser):
@@ -127,6 +129,11 @@ class MaskedLMModel(FairseqEncoderModel):
             "--apply-bert-init",
             action="store_true",
             help="use custom param initialization for BERT",
+        )
+        parser.add_argument(
+            "--apply-small-emb-init",
+            action="store_true",
+            help="use small param initialization for embeddings",
         )
 
         # misc params
@@ -226,6 +233,7 @@ class MaskedLMEncoder(FairseqEncoder):
             learned_pos_embedding=args.encoder_learned_pos,
             resdrop_layer=args.resdrop_layer,
             use_rope=args.use_rope,
+            apply_small_emb_init=args.apply_small_emb_init
         )
 
         self.share_input_output_embed = args.share_encoder_input_output_embed
@@ -304,7 +312,8 @@ class MaskedLMEncoder(FairseqEncoder):
 
             x = self.activation_fn(self.lm_head_transform_weight(x))
             # store final hidden before layernorm to calculate MSE loss
-            # final_hidden = x.clone()
+            final_hidden = x.clone()
+            final_hidden.requires_grad_(False)
             x = self.layer_norm(x)
             pooled_output = self.pooler_activation(self.masked_lm_pooler(sentence_rep))
 
@@ -327,7 +336,7 @@ class MaskedLMEncoder(FairseqEncoder):
                 "inner_states": inner_states,
                 "pooled_output": pooled_output,
                 "sentence_logits": sentence_logits,
-                # "final_hidden": final_hidden
+                "final_hidden": final_hidden
             }
         except Exception as e:
             import os
