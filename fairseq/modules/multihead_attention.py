@@ -163,6 +163,12 @@ class MultiheadAttention(FairseqIncrementalDecoder):
         self.onnx_trace = False
         self.skip_embed_dim_check = False
         self.use_rope = use_rope
+
+        if self.use_rope:
+            self.rotary_ndims = int(self.num_heads * 0.5)
+            self.rotary_emb = RotaryPositionalEmbedding(self.rotary_ndims)
+
+
         self.init_incremental_state()
 
     def prepare_for_onnx_export_(self):
@@ -519,7 +525,6 @@ class MultiheadAttention(FairseqIncrementalDecoder):
 
         # from IPython import embed
         # embed()
-
         # if self.use_rope:
         #     with torch.autocast("cuda"):
         #         rope_pos_emd = RotaryPositionalEmbedding(dim=self.embed_dim)
@@ -536,6 +541,24 @@ class MultiheadAttention(FairseqIncrementalDecoder):
         #         query = query.squeeze(2)
         #         key = key.squeeze(2)
 
+        if self.use_rope:
+            T, B, C = value.size()
+            query = query.view(T, B, self.num_heads, self.kdim)
+            key = key.view(T, B, self.num_heads, self.kdim)
+            value = value.view(T, B, self.num_heads, self.kdim)
+            cos, sin = self.rotary_emb(value, seq_len=T)
+            query, key = apply_rotary_pos_emb(
+                query, key, cos, sin, offset=0
+            )  # offset is based on layer_past
+
+            query = query.view(T, B, self.num_heads * self.kdim)
+            key = key.view(T, B, self.num_heads * self.kdim)
+            value = value.view(T, B, self.num_heads * self.kdim)
+
+            # TBD to BTD
+            query = query.transpose(0, 1)
+            key = key.transpose(0, 1)
+            value = value.transpose(0, 1)
 
         if (
             not self.onnx_trace
@@ -557,7 +580,6 @@ class MultiheadAttention(FairseqIncrementalDecoder):
                 return self._xformers_attn_forward(
                     query, key, value, key_padding_mask, need_weights, attn_mask
                 )
-
             else:
                 return F.multi_head_attention_forward(
                     query,
