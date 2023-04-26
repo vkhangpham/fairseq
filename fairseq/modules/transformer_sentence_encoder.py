@@ -69,9 +69,8 @@ def init_small_emb(module):
         # so that the RNG is consistent with and without FSDP
         data.copy_(data.cpu().normal_(mean=0.0, std=0.02).to(data.device))
 
-    normal_(module.weight.data)
-
     if isinstance(module, nn.Embedding):
+        normal_(module.weight.data)
         nn.init.uniform_(module.weight, a=-1e-4, b=1e-4) # SmallInit(Emb)
 
 
