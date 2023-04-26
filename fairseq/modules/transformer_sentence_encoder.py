@@ -50,6 +50,30 @@ def init_bert_params(module):
         normal_(module.k_proj.weight.data)
         normal_(module.v_proj.weight.data)
 
+def init_small_emb(module):
+    """
+    Initialize the weights specific to the BERT Model.
+    This overrides the default initializations depending on the specified arguments.
+        1. If normal_init_linear_weights is set then weights of linear
+           layer will be initialized using the normal distribution and
+           bais will be set to the specified value.
+        2. If normal_init_embed_weights is set then weights of embedding
+           layer will be initialized using the normal distribution.
+        3. If normal_init_proj_weights is set then weights of
+           in_project_weight for MultiHeadAttention initialized using
+           the normal distribution (to be validated).
+    """
+
+    def normal_(data):
+        # with FSDP, module params will be on CUDA, so we cast them back to CPU
+        # so that the RNG is consistent with and without FSDP
+        data.copy_(data.cpu().normal_(mean=0.0, std=0.02).to(data.device))
+
+    normal_(module.weight.data)
+
+    if isinstance(module, nn.Embedding):
+        nn.init.uniform_(module.weight, a=-1e-4, b=1e-4) # SmallInit(Emb)
+
 
 class TransformerSentenceEncoder(nn.Module):
     """
@@ -103,7 +127,8 @@ class TransformerSentenceEncoder(nn.Module):
         q_noise: float = 0.0,
         qn_block_size: int = 8,
         resdrop_layer=-1,
-        use_rope=False
+        use_rope=False,
+        apply_small_emb_init: bool = False,
     ) -> None:
 
         super().__init__()
@@ -126,6 +151,10 @@ class TransformerSentenceEncoder(nn.Module):
         )
         self.embed_scale = embed_scale
         self.resdrop_layer = resdrop_layer
+
+        self.apply_small_emb_init = apply_small_emb_init
+        if self.apply_small_emb_init:
+            assert encoder_normalize_before, "apply_small_emb_init should be used with encoder_normalize_before"
 
         if q_noise > 0:
             self.quant_noise = apply_quant_noise_(
@@ -184,6 +213,9 @@ class TransformerSentenceEncoder(nn.Module):
         # Apply initialization of model params after building the model
         if self.apply_bert_init:
             self.apply(init_bert_params)
+
+        if self.apply_small_emb_init:
+            self.apply(init_small_emb)
 
         def freeze_module_params(m):
             if m is not None:
