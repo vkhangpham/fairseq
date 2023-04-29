@@ -312,7 +312,7 @@ class MaskedLMEncoder(FairseqEncoder):
 
             x = self.activation_fn(self.lm_head_transform_weight(x))
             # store final hidden before layernorm to calculate MSE loss
-            final_hidden = x.clone()
+            final_hidden = x.detach().clone()
             final_hidden.requires_grad_(False)
             x = self.layer_norm(x)
             pooled_output = self.pooler_activation(self.masked_lm_pooler(sentence_rep))
@@ -490,8 +490,9 @@ def cl_encoder(args):
     args.pooler_activation_fn = getattr(args, "pooler_activation_fn", "tanh")
     args.apply_bert_init = getattr(args, "apply_bert_init", True)
 
-    args.resdrop_layer = -1
-    args.use_rope = False
+    args.resdrop_layer =  getattr(args, "resdrop_layer", -1)
+    args.use_rope = getattr(args,' use_rope', False)
+    args.apply_small_emb_init = getattr(args, 'apply_small_emb_init', False)
 
     base_architecture(args)
 
