@@ -35,7 +35,7 @@ from .mask_tokens_dataset import MaskTokensDataset
 from .monolingual_dataset import MonolingualDataset
 from .multi_corpus_sampled_dataset import MultiCorpusSampledDataset
 from .nested_dictionary_dataset import NestedDictionaryDataset
-from .noising import NoisingDataset
+from .noising import NoisingDataset, UnsupervisedMTNoising
 from .numel_dataset import NumelDataset
 from .num_samples_dataset import NumSamplesDataset
 from .offset_tokens_dataset import OffsetTokensDataset
@@ -107,6 +107,7 @@ __all__ = [
     "MultiCorpusSampledDataset",
     "NestedDictionaryDataset",
     "NoisingDataset",
+    "UnsupervisedMTNoising",
     "NumelDataset",
     "NumSamplesDataset",
     "OffsetTokensDataset",
