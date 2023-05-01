@@ -203,7 +203,7 @@ class TransformerSentenceEncoder(nn.Module):
                     export=export,
                     q_noise=q_noise,
                     qn_block_size=qn_block_size,
-                    use_rope=use_rope
+                    use_rope=use_rope,
                 )
                 for _ in range(num_encoder_layers)
             ]
@@ -245,7 +245,7 @@ class TransformerSentenceEncoder(nn.Module):
         export,
         q_noise,
         qn_block_size,
-        use_rope
+        use_rope,
     ):
         return TransformerSentenceEncoderLayer(
             embedding_dim=embedding_dim,
@@ -258,7 +258,7 @@ class TransformerSentenceEncoder(nn.Module):
             export=export,
             q_noise=q_noise,
             qn_block_size=qn_block_size,
-            use_rope=use_rope
+            use_rope=use_rope,
         )
 
     def forward(

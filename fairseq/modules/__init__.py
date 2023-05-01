@@ -50,6 +50,7 @@ from .rotary_positional_embedding import RotaryPositionalEmbedding
 from .positional_encoding import (
     RelPositionalEncoding,
 )
+from .mha_rotary import MHA_rotary, MHA_pro
 
 __all__ = [
     "AdaptiveInput",
@@ -85,6 +86,8 @@ __all__ = [
     "LocationAttention",
     "LSTMCellWithZoneOut",
     "MultiheadAttention",
+    "MHA_rotary",
+    "MHA_pro",
     "PositionalEmbedding",
     "SamePad",
     "SamePad2d",

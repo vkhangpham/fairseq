@@ -12,6 +12,7 @@ from torch import Tensor
 from fairseq import utils
 from fairseq.models.transformer import TransformerConfig
 from fairseq.modules import LayerNorm, MultiheadAttention
+from fairseq.modules.mha_rotary import MHA_pro, MHA_rotary
 from fairseq.modules.fairseq_dropout import FairseqDropout
 from fairseq.modules.quant_noise import quant_noise
 
@@ -133,6 +134,13 @@ class TransformerEncoderLayerBase(nn.Module):
         self.fc2.bias = torch.nn.Parameter(new_fc2_bias)
 
     def build_self_attention(self, embed_dim, cfg):
+        if cfg.use_rope:
+            return MHA_rotary(
+                n_attn=embed_dim,
+                n_head=cfg.encoder.attention_heads,
+                n_embd=embed_dim,
+                ctx_len=128
+            )
         return MultiheadAttention(
             embed_dim,
             cfg.encoder.attention_heads,
@@ -350,6 +358,13 @@ class TransformerDecoderLayerBase(nn.Module):
     def build_self_attention(
         self, embed_dim, cfg, add_bias_kv=False, add_zero_attn=False
     ):
+        if cfg.use_rope:
+            return MHA_rotary(
+                n_attn=embed_dim,
+                n_head=cfg.decoder.attention_heads,
+                n_embd=embed_dim,
+                ctx_len=128
+            )
         return MultiheadAttention(
             embed_dim,
             cfg.decoder.attention_heads,

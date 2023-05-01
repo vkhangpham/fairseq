@@ -11,7 +11,7 @@ from fairseq import utils
 from fairseq.modules import LayerNorm, MultiheadAttention
 from fairseq.modules.fairseq_dropout import FairseqDropout
 from fairseq.modules.quant_noise import quant_noise
-
+from fairseq.modules.mha_rotary import MHA_rotary, MHA_pro
 
 class TransformerSentenceEncoderLayer(nn.Module):
     """
@@ -32,7 +32,8 @@ class TransformerSentenceEncoderLayer(nn.Module):
         q_noise: float = 0.0,
         qn_block_size: int = 8,
         init_fn: Callable = None,
-        use_rope=False
+        use_rope=False,
+        
     ) -> None:
         super().__init__()
 
@@ -40,6 +41,7 @@ class TransformerSentenceEncoderLayer(nn.Module):
             init_fn()
 
         # Initialize parameters
+        self.use_rope = use_rope
         self.embedding_dim = embedding_dim
         self.num_attention_heads = num_attention_heads
         self.attention_dropout = attention_dropout
@@ -100,6 +102,13 @@ class TransformerSentenceEncoderLayer(nn.Module):
         qn_block_size,
         use_rope=False
     ):
+        if use_rope:
+            return MHA_rotary(
+                n_attn=embed_dim,
+                n_embd=embed_dim,
+                n_head=num_attention_heads,
+                ctx_len=128
+            )
         return MultiheadAttention(
             embed_dim,
             num_attention_heads,
@@ -122,14 +131,19 @@ class TransformerSentenceEncoderLayer(nn.Module):
         modules similar to the original Transformer implementation.
         """
         residual = x
-        x, attn = self.self_attn(
-            query=x,
-            key=x,
-            value=x,
-            key_padding_mask=self_attn_padding_mask,
-            need_weights=False,
-            attn_mask=self_attn_mask,
-        )
+
+        if self.use_rope:
+            x = self.self_attn(x)
+            attn = None
+        else:
+            x, attn = self.self_attn(
+                query=x,
+                key=x,
+                value=x,
+                key_padding_mask=self_attn_padding_mask,
+                need_weights=False,
+                attn_mask=self_attn_mask,
+            )
         x = self.dropout_module(x)
 
         # only add residual connection if not specify `drop`
