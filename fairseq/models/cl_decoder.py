@@ -23,6 +23,7 @@ from fairseq.models.transformer import (
 )
 from fairseq.modules import AdaptiveInput, CharacterTokenEmbedder
 from fairseq.utils import safe_getattr, safe_hasattr
+from fairseq.data import UnsupervisedMTNoising
 
 import torch
 import numpy as np
@@ -239,13 +240,19 @@ class CLDecoderConfig(FairseqDataclass):
 class CLDecoder(FairseqLanguageModel):
     def __init__(self, decoder, interface):
         super().__init__(decoder)
-        self.interface = interface
-        self.bpe_ends = torch.BoolTensor(
-            [
-                not self.decoder.dictionary.symbols[i].endswith('@@') 
-                for i in range(len(self.decoder.dictionary.symbols))
-            ]
+        self.noiser = UnsupervisedMTNoising(
+            dictionary=self.decoder.dictionary,
+            max_word_shuffle_distance=3,
+            word_dropout_prob=0.1,
+            word_blanking_prob=0.1
         )
+        self.interface = interface
+        # self.bpe_ends = torch.BoolTensor(
+        #     [
+        #         not self.decoder.dictionary.symbols[i].endswith('@@') 
+        #         for i in range(len(self.decoder.dictionary.symbols))
+        #     ]
+        # )
 
     @classmethod
     def build_model(cls, args, task):
@@ -299,7 +306,8 @@ class CLDecoder(FairseqLanguageModel):
 
         interface = Embedding(len(task.source_dictionary), args.decoder_input_dim, padding_idx=task.source_dictionary.pad()) 
         interface.load_state_dict(torch.load(args.semface_path), strict=False)
-        interface.requires_grad_(False)
+        for m in interface.parameters():
+            m.requires_grad_(False)
 
         return cls(decoder, interface)
 
@@ -309,9 +317,7 @@ class CLDecoder(FairseqLanguageModel):
         return embed_tokens
 
     def forward(self, src_tokens, **kwargs):
-        assert "src_lengths" in kwargs.keys()
-
-        noisy_sample, _ = self.add_noise(src_tokens, kwargs['src_lengths'])
+        noisy_sample = self.add_noise(src_tokens, kwargs['src_lengths'])
         encoder_out = self.interface(noisy_sample)
 
         # B x T x C -> T x B x C
@@ -327,9 +333,13 @@ class CLDecoder(FairseqLanguageModel):
         """
         Add noise to the encoder input.
         """
-        src_tokens = word_shuffle(self.bpe_ends, src_tokens, src_lengths)
-        # src_tokens, src_lengths = word_dropout_torch(self.decoder.dictionary, self.bpe_ends, src_tokens, src_lengths)
-        return src_tokens, src_lengths
+        # word noising expect tensor of shape TxB
+        noisy_src_tokens = self.noiser.noising(src_tokens.t().cpu(), src_lengths.cpu())
+
+        # Transpose back to expected src_tokens format
+        noisy_src_tokens = noisy_src_tokens.t()
+        
+        return noisy_src_tokens.to(src_tokens.device)
 
 def word_shuffle(bpe_ends, x, l, shuffle=3):
     """
@@ -470,6 +480,10 @@ def base_lm_architecture(args):
         args, "decoder_input_dim", args.decoder_embed_dim
     )
 
+    args.use_rope = safe_getattr(
+        args, "use_rope", False
+    )
+
     # Model training is not stable without this
     args.decoder_normalize_before = True
     args.no_decoder_final_norm = safe_getattr(args, "no_decoder_final_norm", False)
@@ -503,16 +517,24 @@ def cl_decoder_base(args):
     args.decoder_embed_dim = safe_getattr(args, "decoder_embed_dim", 1024)
     args.decoder_ffn_embed_dim = safe_getattr(args, "decoder_ffn_embed_dim", 4096)
     args.decoder_attention_heads = safe_getattr(args, "decoder_attention_heads", 8)
+
     base_lm_architecture(args)
 
-@register_model_architecture("cl_decoder", "cl_decoder_toy")
-def cl_decoder_base(args):
+@register_model_architecture("cl_decoder", "cl_decoder_pde")
+def cl_decoder_pde(args):
     args.share_decoder_input_output_embed = safe_getattr(
         args, "share_decoder_input_output_embed", True
     )
     args.activation_fn = safe_getattr(args, "activation_fn", "gelu")
-    args.decoder_layers = safe_getattr(args, "decoder_layers", 1)
-    args.decoder_embed_dim = safe_getattr(args, "decoder_embed_dim", 10)
-    args.decoder_ffn_embed_dim = safe_getattr(args, "decoder_ffn_embed_dim", 10)
-    args.decoder_attention_heads = safe_getattr(args, "decoder_attention_heads", 1)
+    args.decoder_layers = safe_getattr(args, "decoder_layers", 6)
+    args.decoder_embed_dim = safe_getattr(args, "decoder_embed_dim", 1024)
+    args.decoder_ffn_embed_dim = safe_getattr(args, "decoder_ffn_embed_dim", 4096)
+    args.decoder_attention_heads = safe_getattr(args, "decoder_attention_heads", 8)
+    
+    args.use_rope = safe_getattr(args, "use_rope", True)
+    args.no_token_positional_embeddings = safe_getattr(
+        args, "no_token_positional_embeddings", True
+    )
+    args.layernorm_embedding = safe_getattr(args, "layernorm_embedding", True)
+
     base_lm_architecture(args)
