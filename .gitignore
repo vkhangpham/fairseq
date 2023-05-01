@@ -147,3 +147,4 @@ examples/
 
 # init script
 init*
+*.ipynb
