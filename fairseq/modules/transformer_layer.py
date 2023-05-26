@@ -137,9 +137,9 @@ class TransformerEncoderLayerBase(nn.Module):
         if cfg.use_rope:
             return MHA_rotary(
                 n_attn=embed_dim,
-                n_head=cfg.encoder.attention_heads,
+                num_heads=cfg.encoder.attention_heads,
                 n_embd=embed_dim,
-                ctx_len=128
+                ctx_len=1024
             )
         return MultiheadAttention(
             embed_dim,
@@ -202,14 +202,17 @@ class TransformerEncoderLayerBase(nn.Module):
         residual = x
         if self.normalize_before:
             x = self.self_attn_layer_norm(x)
-        x, _ = self.self_attn(
-            query=x,
-            key=x,
-            value=x,
-            key_padding_mask=encoder_padding_mask,
-            need_weights=False,
-            attn_mask=attn_mask,
-        )
+        if isinstance(self.self_attn, MHA_rotary):
+            x = self.self_attn(x)
+        else:
+            x, _ = self.self_attn(
+                query=x,
+                key=x,
+                value=x,
+                key_padding_mask=encoder_padding_mask,
+                need_weights=False,
+                attn_mask=attn_mask,
+            )
         x = self.dropout_module(x)
         x = self.residual_connection(x, residual)
         if not self.normalize_before:
@@ -361,9 +364,9 @@ class TransformerDecoderLayerBase(nn.Module):
         if cfg.use_rope:
             return MHA_rotary(
                 n_attn=embed_dim,
-                n_head=cfg.decoder.attention_heads,
+                num_heads=cfg.decoder.attention_heads,
                 n_embd=embed_dim,
-                ctx_len=128
+                ctx_len=1024
             )
         return MultiheadAttention(
             embed_dim,
@@ -408,6 +411,8 @@ class TransformerDecoderLayerBase(nn.Module):
         self_attn_padding_mask: Optional[torch.Tensor] = None,
         need_attn: bool = False,
         need_head_weights: bool = False,
+        cs_tokens: Optional[torch.Tensor] = None,
+        cs_tokens_padding_mask: Optional[torch.Tensor] = None,
     ):
         """
         Args:
@@ -438,7 +443,10 @@ class TransformerDecoderLayerBase(nn.Module):
                 saved_state["prev_key_padding_mask"] = prev_self_attn_state[2]
             assert incremental_state is not None
             self.self_attn._set_input_buffer(incremental_state, saved_state)
-        _self_attn_input_buffer = self.self_attn._get_input_buffer(incremental_state)
+        if isinstance(self.self_attn, MHA_rotary):
+            _self_attn_input_buffer = {}
+        else:
+            _self_attn_input_buffer = self.self_attn._get_input_buffer(incremental_state)
         if self.cross_self_attention and not (
             incremental_state is not None
             and _self_attn_input_buffer is not None
@@ -463,15 +471,19 @@ class TransformerDecoderLayerBase(nn.Module):
         else:
             y = x
 
-        x, attn = self.self_attn(
-            query=x,
-            key=y,
-            value=y,
-            key_padding_mask=self_attn_padding_mask,
-            incremental_state=incremental_state,
-            need_weights=False,
-            attn_mask=self_attn_mask,
-        )
+        if isinstance(self.self_attn, MHA_rotary):
+            x = self.self_attn(x)
+            attn = None
+        else:
+            x, attn = self.self_attn(
+                query=x,
+                key=y,
+                value=y,
+                key_padding_mask=self_attn_padding_mask,
+                incremental_state=incremental_state,
+                need_weights=False,
+                attn_mask=self_attn_mask,
+            )
         if self.c_attn is not None:
             tgt_len, bsz = x.size(0), x.size(1)
             x = x.view(tgt_len, bsz, self.nh, self.head_dim)
@@ -498,17 +510,42 @@ class TransformerDecoderLayerBase(nn.Module):
                     saved_state["prev_key_padding_mask"] = prev_attn_state[2]
                 assert incremental_state is not None
                 self.encoder_attn._set_input_buffer(incremental_state, saved_state)
-
-            x, attn = self.encoder_attn(
-                query=x,
-                key=encoder_out,
-                value=encoder_out,
-                key_padding_mask=encoder_padding_mask,
-                incremental_state=incremental_state,
-                static_kv=True,
-                need_weights=need_attn or (not self.training and self.need_attn),
-                need_head_weights=need_head_weights,
-            )
+                
+            # TODO: if there is a code-switched (cs) tokens in encoder_out
+            # swap source tokens after current time step `t`` to cs tokens 
+            # pseudo example:
+            # time:         0       1      2    3     4      5        6       7
+            # src_tokens: hello | world | i   | am | a   | neural | network | .
+            # cs:         chao  | gioi  | toi | la | mot | noron  | mang    | .
+            # current time step: 2
+            # desired output: hello world i la mot noron mang .
+            
+            # cs_tokens: T x B x C
+            cs_attn_weights = None
+            if cs_tokens is not None:
+                assert self_attn_mask is not None
+                # from IPython import embed; embed()
+                cs_attn_weights, _ = self.encoder_attn(
+                    query=x,
+                    key=cs_tokens,
+                    value=cs_tokens,
+                    key_padding_mask=cs_tokens_padding_mask,
+                    static_kv=True,
+                    before_softmax=True
+                )
+            if cs_attn_weights is not None:
+                x, attn = self.encoder_attn(
+                    query=x,
+                    key=encoder_out,
+                    value=encoder_out,
+                    key_padding_mask=encoder_padding_mask,
+                    incremental_state=incremental_state,
+                    static_kv=True,
+                    need_weights=need_attn or (not self.training and self.need_attn),
+                    need_head_weights=need_head_weights,
+                    cs_attn_weights=cs_attn_weights,
+                    attn_mask=self_attn_mask,
+                )
             x = self.dropout_module(x)
             x = self.residual_connection(x, residual)
             if not self.normalize_before:
