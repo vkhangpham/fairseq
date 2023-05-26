@@ -388,11 +388,8 @@ def base_architecture(args):
     args.sentence_class_num = getattr(args, "sentence_class_num", 2)
     args.sent_loss = getattr(args, "sent_loss", False)
 
-    args.apply_bert_init = getattr(args, "apply_bert_init", False)
-
-    args.activation_fn = getattr(args, "activation_fn", "relu")
-    args.pooler_activation_fn = getattr(args, "pooler_activation_fn", "tanh")
-    args.encoder_normalize_before = getattr(args, "encoder_normalize_before", False)
+    args.apply_bert_init = getattr(args, "apply_bert_init", True)
+    args.pretrained_emb_out = getattr(args, "pretrained_emb_out", None)
 
 @register_model_architecture("masked_lm", "bert_base")
 def bert_base_architecture(args):
@@ -454,10 +451,6 @@ def xlm_architecture(args):
     args.encoder_normalize_before = getattr(args, "encoder_normalize_before", False)
     args.pooler_activation_fn = getattr(args, "pooler_activation_fn", "tanh")
     args.apply_bert_init = getattr(args, "apply_bert_init", True)
-
-    args.resdrop_layer =  getattr(args, "resdrop_layer", -1)
-    args.use_rope = getattr(args,' use_rope', False)
-    args.apply_small_emb_init = getattr(args, 'apply_small_emb_init', False)
     base_architecture(args)
 
 
@@ -498,12 +491,12 @@ def cl_pde_architecture(args):
     args.max_positions = getattr(args, "max_positions", 128)
 
     args.share_encoder_input_output_embed = getattr(
-        args, "share_encoder_input_output_embed", False
+        args, "share_encoder_input_output_embed", True
     )
     args.no_token_positional_embeddings = getattr(
         args, "no_token_positional_embeddings", False
     )
-    args.encoder_learned_pos = getattr(args, "encoder_learned_pos", True)
+    args.encoder_learned_pos = getattr(args, "encoder_learned_pos", False)
     args.num_segment = getattr(args, "num_segment", 2)
 
     args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 8)
@@ -515,11 +508,11 @@ def cl_pde_architecture(args):
     args.activation_fn = getattr(args, "activation_fn", "gelu")
     args.encoder_normalize_before = getattr(args, "encoder_normalize_before", False)
     args.pooler_activation_fn = getattr(args, "pooler_activation_fn", "tanh")
-    args.apply_bert_init = getattr(args, "apply_bert_init", True)
+    args.apply_bert_init = getattr(args, "apply_bert_init", False)
 
-    args.resdrop_layer =  getattr(args, "resdrop_layer", args.encoder_layers - 1)
+    args.resdrop_layer =  getattr(args, "resdrop_layer", 4)
     args.use_rope = getattr(args,' use_rope', False)
-    args.apply_small_emb_init = getattr(args, 'apply_small_emb_init', False)
+    args.apply_small_emb_init = getattr(args, 'apply_small_emb_init', True)
 
     base_architecture(args)
 
@@ -532,7 +525,7 @@ def cl_pde_rope_architecture(args):
         args, "share_encoder_input_output_embed", True
     )
     args.no_token_positional_embeddings = getattr(
-        args, "no_token_positional_embeddings", True
+        args, "no_token_positional_embeddings", False
     )
     args.encoder_learned_pos = getattr(args, "encoder_learned_pos", False)
     args.num_segment = getattr(args, "num_segment", 2)
@@ -546,7 +539,7 @@ def cl_pde_rope_architecture(args):
     args.activation_fn = getattr(args, "activation_fn", "gelu")
     args.encoder_normalize_before = getattr(args, "encoder_normalize_before", True)
     args.pooler_activation_fn = getattr(args, "pooler_activation_fn", "tanh")
-    args.apply_bert_init = getattr(args, "apply_bert_init", True)
+    args.apply_bert_init = getattr(args, "apply_bert_init", False)
    
     # RoPE config
     args.resdrop_layer =  getattr(args, "resdrop_layer", 4)
