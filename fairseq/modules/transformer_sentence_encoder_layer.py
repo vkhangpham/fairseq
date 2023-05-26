@@ -106,7 +106,7 @@ class TransformerSentenceEncoderLayer(nn.Module):
             return MHA_rotary(
                 n_attn=embed_dim,
                 n_embd=embed_dim,
-                n_head=num_attention_heads,
+                num_heads=num_attention_heads,
                 ctx_len=128
             )
         return MultiheadAttention(
@@ -116,7 +116,6 @@ class TransformerSentenceEncoderLayer(nn.Module):
             self_attention=True,
             q_noise=q_noise,
             qn_block_size=qn_block_size,
-            use_rope=use_rope
         )
 
     def forward(
