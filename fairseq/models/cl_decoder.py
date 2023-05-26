@@ -4,7 +4,10 @@
 # LICENSE file in the root directory of this source tree.
 
 
+from collections import defaultdict
 from dataclasses import dataclass, field
+import os
+import random
 from typing import Optional
 
 from omegaconf import II
@@ -26,7 +29,9 @@ from fairseq.utils import safe_getattr, safe_hasattr
 from fairseq.data import UnsupervisedMTNoising
 
 import torch
-import numpy as np
+import numpy as np    
+import fastBPE
+
 
 DEFAULT_MAX_TARGET_POSITIONS = 1024
 
@@ -228,6 +233,10 @@ class CLDecoderConfig(FairseqDataclass):
         default=None,
         metadata={"help": "path to trained semantic interface"},
     )
+    freeze_dec_emb: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Freeze decoder embeddings."},
+    )
 
     # options from other parts of the config
     add_bos_token: bool = II("task.add_bos_token")
@@ -313,18 +322,28 @@ class CLDecoder(FairseqLanguageModel):
 
     @classmethod
     def build_embedding(cls, args, dictionary, embed_dim, path=None):
-        embed_tokens = Embedding(len(dictionary), embed_dim, dictionary.pad())
+        embed_tokens = Embedding(len(dictionary), embed_dim, padding_idx=dictionary.pad())
+        # torch.nn.init.uniform_(embed_tokens.weight, a=-1e-4, b=1e-4) # SmallInit(Emb)
+        # torch.nn.init.constant_(embed_tokens.weight[dictionary.pad()], 0)
+        embed_tokens.load_state_dict(torch.load(args.semface_path), strict=False)
+        if args.freeze_dec_emb:
+            for m in embed_tokens.parameters():
+                m.requires_grad_(False)
         return embed_tokens
 
     def forward(self, src_tokens, **kwargs):
-        noisy_sample = self.add_noise(src_tokens, kwargs['src_lengths'])
+        # TODO:
+        # create a code-switched (cs) version of the src_tokens
+        # the cs tokens do not contain other noise
+        # pass the cs to the encoder_out
+        noisy_sample, _ = self.add_noise(src_tokens, kwargs['src_lengths'])
         encoder_out = self.interface(noisy_sample)
 
         # B x T x C -> T x B x C
         encoder_out = encoder_out.transpose(0, 1)
         encoder_out = {
             "encoder_out": [encoder_out],  # T x B x C
-            "encoder_padding_mask": [src_tokens.eq(self.decoder.padding_idx)]
+            "encoder_padding_mask": [noisy_sample.eq(self.decoder.padding_idx)]
         }
         return self.decoder(src_tokens, encoder_out)
 
@@ -334,100 +353,13 @@ class CLDecoder(FairseqLanguageModel):
         Add noise to the encoder input.
         """
         # word noising expect tensor of shape TxB
-        noisy_src_tokens = self.noiser.noising(src_tokens.t().cpu(), src_lengths.cpu())
+        modified_x, modified_lengths = self.noiser.noising(src_tokens.t().cpu(), src_lengths.cpu())
 
         # Transpose back to expected src_tokens format
-        noisy_src_tokens = noisy_src_tokens.t()
+        modified_x = modified_x.t().to(src_tokens.device)
+        modified_lengths = modified_lengths.to(src_tokens.device)
         
-        return noisy_src_tokens.to(src_tokens.device)
-
-def word_shuffle(bpe_ends, x, l, shuffle=3):
-    """
-    Randomly shuffle input words.
-    """
-    try:
-        if shuffle == 0:
-            return x, l
-
-        device = x.device
-        # define noise word scores
-        noise = shuffle * torch.rand(x.size(0), x.size(1), device=device)
-        # noise[0] = -1  # do not move start sentence symbol
-        noise[x<4] = -1
-
-        # be sure to shuffle entire word
-        bpe_end = bpe_ends.to(device)[x]
-        word_idx = bpe_end.flip(1).cumsum(1).flip(1)
-        word_idx = word_idx.max(1, keepdims=True).values - word_idx
-
-        assert shuffle > 1
-        x2 = x.clone()
-        for i in range(l.size(0)):
-            if l[i] != word_idx.size(-1):
-                continue
-            # generate a random permutation
-            scores = word_idx[i] + noise[i, word_idx[i]]
-            scores += 1e-6 * torch.arange(l[i], device=device)  # ensure no reordering inside a word
-            permutation = scores.argsort()
-
-            # shuffle words
-            x2[i] = x[i][permutation]
-        return x2
-    except Exception as e:
-        from IPython import embed
-        print("In word shuffle torch")
-        print("Error: ", e)
-        embed()
-
-def word_dropout_torch(dictionary, bpe_ends, x, l, word_dropout=.1):
-    """
-    Randomly drop input words.
-    """
-    try:
-        if word_dropout == 0:
-            return x, l
-        assert 0 < word_dropout < 1
-
-        device = x.device
-        # define words to drop
-        bos_index = dictionary.bos()
-        keep = torch.rand(x.size(0), x.size(1), device=device) >= word_dropout
-        keep[x<4] = 1  # do not drop the special symbol
-
-        # be sure to drop entire words
-        bpe_end = bpe_ends[x]
-        word_idx = bpe_end[::-1].cumsum(0)[::-1]
-        word_idx = word_idx.max(0)[None, :] - word_idx
-
-        sentences = []
-        lengths = []
-        for i in range(l.size(0)):
-            assert x[i, l[i] - 1] == dictionary.eos()
-            words = x[i, :l[i] - 1].tolist()
-            # randomly drop words from the input
-            new_s = [w for j, w in enumerate(words) if keep[word_idx[j, i], i]]
-            # we need to have at least one word in the sentence (more than the start / end sentence symbols)
-            if len(new_s) == 1:
-                new_s.append(words[np.random.randint(1, len(words))])
-            new_s.append(dictionary.eos())
-
-            # sanity check
-            assert len(new_s) >= 3 and new_s[0] == bos_index and new_s[-1] == dictionary.eos()
-
-            sentences.append(new_s)
-            lengths.append(len(new_s))
-
-        # re-construct input
-        l2 = torch.LongTensor(lengths)
-        x2 = torch.LongTensor(l2.max(), l2.size(0)).fill_(dictionary.pad())
-        for i in range(l2.size(0)):
-            x2[:l2[i], i].copy_(torch.LongTensor(sentences[i]))
-    except Exception as e:
-        from IPython import embed
-        print("In word dropout torch")
-        print("Error: ", e)
-        embed()
-    return x2, l2
+        return modified_x, modified_lengths
 
 def base_lm_architecture(args):
     # backward compatibility for older model checkpoints
@@ -531,9 +463,9 @@ def cl_decoder_pde(args):
     args.decoder_ffn_embed_dim = safe_getattr(args, "decoder_ffn_embed_dim", 4096)
     args.decoder_attention_heads = safe_getattr(args, "decoder_attention_heads", 8)
     
-    args.use_rope = safe_getattr(args, "use_rope", True)
+    args.use_rope = safe_getattr(args, "use_rope", False)
     args.no_token_positional_embeddings = safe_getattr(
-        args, "no_token_positional_embeddings", True
+        args, "no_token_positional_embeddings", False
     )
     args.layernorm_embedding = safe_getattr(args, "layernorm_embedding", True)
 
