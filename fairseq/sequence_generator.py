@@ -16,6 +16,7 @@ from fairseq.data import data_utils
 from fairseq.models import FairseqIncrementalDecoder
 from fairseq.ngram_repeat_block import NGramRepeatBlock
 
+from unicodedata import category
 
 class SequenceGenerator(nn.Module):
     def __init__(
@@ -368,6 +369,8 @@ class SequenceGenerator(nn.Module):
             ):
                 lprobs, avg_attn_scores = self.model.forward_decoder(
                     tokens[:, : step + 1],
+                    src_tokens,
+                    cp,
                     encoder_outs,
                     incremental_states,
                     self.temperature,
@@ -612,8 +615,8 @@ class SequenceGenerator(nn.Module):
 
         punc_list=[0,1,2,3]
         loc=4
-        with open(path,'r') as dict:
-            for line in dict:
+        with open(path,'r') as dico:
+            for line in dico:
                 tmp = line.split()[0]
                 if len(tmp)==1 and tmp in punctuation_chars:
                     punc_list.append(loc)
@@ -838,6 +841,8 @@ class EnsembleModel(nn.Module):
     def forward_decoder(
         self,
         tokens,
+        src_tokens,
+        cp,
         encoder_outs: List[Dict[str, List[Tensor]]],
         incremental_states: List[Dict[str, Dict[str, Optional[Tensor]]]],
         temperature: float = 1.0,
@@ -882,6 +887,33 @@ class EnsembleModel(nn.Module):
             probs = model.get_normalized_probs(
                 decoder_out_tuple, log_probs=True, sample=None
             )
+
+            # add copying penalty
+            # decopying_penalty = torch.log(torch.tensor(cp['alpha'])).to(probs.device)
+            # decopying_penalty = decopying_penalty.unsqueeze(0).expand_as(decopy_src)
+            # # from IPython import embed
+            # # embed()
+            # negative_targets = torch.zeros_like(probs).scatter_(2, decopy_src, decopying_penalty)
+            # probs += negative_targets
+
+            if cp['alpha'] != 1.0:
+                decopy_src = src_tokens.unsqueeze(1).expand(-1, probs.size(1), -1)
+                decopy_src = decopy_src.masked_fill(sum(decopy_src == punc for punc in cp['punc_list']).bool(),
+                                                    model.decoder.embed_tokens.padding_idx)
+                bsz, _, src_len = decopy_src.size()
+                beam = probs.size(0) // bsz  # should be divisible anyway
+                penalty = torch.ones_like(probs)
+
+                # create boolean mask for the penalty tensor
+                src_mask = torch.zeros_like(probs, dtype=torch.bool)
+                for i in range(bsz):
+                    src_mask[i*beam:(i+1)*beam, :, decopy_src[i, 0, :]] = True
+                src_mask[:,:,:5] = False  # un-mask special tokens (pad, eos...)
+
+                # apply the penalty to the appropriate elements
+                penalty[src_mask] = cp['alpha']
+                probs = probs*penalty
+
             probs = probs[:, -1, :]
             if self.models_size == 1:
                 return probs, attn
