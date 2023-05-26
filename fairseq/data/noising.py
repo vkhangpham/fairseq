@@ -239,6 +239,7 @@ class UnsupervisedMTNoising(WordNoising):
             x=noisy_src_tokens,
             lengths=noisy_src_lengths,
             dropout_prob=self.word_dropout_prob,
+            blank_idx=self.dictionary.pad(),
         )
         # 3. Word Blanking
         noisy_src_tokens, noisy_src_lengths = self.word_dropout.noising(
@@ -248,7 +249,7 @@ class UnsupervisedMTNoising(WordNoising):
             blank_idx=self.dictionary.unk(),
         )
 
-        return noisy_src_tokens
+        return noisy_src_tokens, noisy_src_lengths
 
 
 class NoisingDataset(torch.utils.data.Dataset):
