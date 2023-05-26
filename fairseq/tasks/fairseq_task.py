@@ -498,6 +498,8 @@ class FairseqTask(object):
             match_source_len=getattr(args, "match_source_len", False),
             no_repeat_ngram_size=getattr(args, "no_repeat_ngram_size", 0),
             search_strategy=search_strategy,
+            cp_alpha=getattr(args, "copypen", 1.0),
+            tgt_dict_path=getattr(args, "target_dictionary_path", ""),
             **extra_gen_cls_kwargs,
         )
 
