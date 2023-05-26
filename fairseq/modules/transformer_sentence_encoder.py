@@ -69,9 +69,17 @@ def init_small_emb(module):
         # so that the RNG is consistent with and without FSDP
         data.copy_(data.cpu().normal_(mean=0.0, std=0.02).to(data.device))
 
+    if isinstance(module, (nn.Linear)):
+        normal_(module.weight.data)
+        module.weight.data.normal_(mean=0.0, std=0.01)
+    if isinstance(module, nn.Linear) and module.bias is not None:
+        normal_(module.weight.data)
+        module.bias.data.zero_()
     if isinstance(module, nn.Embedding):
         normal_(module.weight.data)
         nn.init.uniform_(module.weight, a=-1e-4, b=1e-4) # SmallInit(Emb)
+        if module.padding_idx is not None:
+            module.weight.data[module.padding_idx].zero_()
 
 
 class TransformerSentenceEncoder(nn.Module):
