@@ -6,6 +6,7 @@
 import math
 from dataclasses import dataclass
 
+import torch
 import torch.nn.functional as F
 from fairseq import utils
 from fairseq.logging import metrics
@@ -25,7 +26,7 @@ class CrossEntropyCriterion(FairseqCriterion):
         super().__init__(task)
         self.sentence_avg = sentence_avg
 
-    def forward(self, model, sample, reduce=True):
+    def forward(self, model, sample, reduce=True, use_coverage=True):
         """Compute the loss for the given sample.
 
         Returns a tuple with three elements:
@@ -34,7 +35,12 @@ class CrossEntropyCriterion(FairseqCriterion):
         3) logging outputs to display while training
         """
         net_output = model(**sample["net_input"])
+        if use_coverage:
+            attn_dist = net_output[1]
+            coverage = net_output[2]   
+            coverage_loss = torch.sum(torch.min(attn_dist,coverage))
         loss, _ = self.compute_loss(model, net_output, sample, reduce=reduce)
+        loss += coverage_loss
         sample_size = (
             sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
         )

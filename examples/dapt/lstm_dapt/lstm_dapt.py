@@ -35,6 +35,8 @@ class LSTMDAPTModel(LSTMModel):
                             help='dictionary includes N additional items that '
                                  'represent an OOV token at a particular input '
                                  'position')
+        parser.add_argument('--use-coverage', default=False, action='store_true',
+                            help="use coverage mechanism")
 
     @classmethod
     def build_model(cls, args, task):
@@ -147,9 +149,25 @@ class LSTMDAPTModel(LSTMModel):
             ),
             max_target_positions=max_target_positions,
             residuals=False,
-            source_position_markers=args.source_position_markers
+            source_position_markers=args.source_position_markers,
+            use_coverage=args.use_coverage
         )
         return cls(encoder, decoder)
+    
+    def forward(
+        self,
+        src_tokens,
+        src_lengths,
+        prev_output_tokens,
+        incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
+    ):
+        encoder_out = self.encoder(src_tokens, src_lengths=src_lengths)
+        decoder_out = self.decoder(
+            prev_output_tokens,
+            encoder_out=encoder_out,
+            incremental_state=incremental_state,
+        )
+        return decoder_out
 
 class LSTMDAPTEncoder(LSTMEncoder):
     def __init__(
@@ -212,7 +230,7 @@ class LSTMDAPTEncoder(LSTMEncoder):
                 encoder_out[5].index_select(0,new_order),
             )
         )
-    
+      
 class LSTMDAPTDecoder(LSTMDecoder):
     def __init__(
         self, 
@@ -230,7 +248,8 @@ class LSTMDAPTDecoder(LSTMDecoder):
         adaptive_softmax_cutoff=None, 
         max_target_positions=..., 
         residuals=False,
-        source_position_markers=1000
+        source_position_markers=1000,
+        use_coverage=False
     ):
         super().__init__(
             dictionary, 
@@ -248,7 +267,7 @@ class LSTMDAPTDecoder(LSTMDecoder):
             max_target_positions, 
             residuals
         )
-        self.attention = LSTMSoftAttention(self.hidden_size)
+        self.attention = LSTMSoftAttention(self.hidden_size, use_coverage=use_coverage)
         self.num_types = len(dictionary)
         self.num_oov_types = source_position_markers
         self.num_embeddings = self.num_types - self.num_oov_types
@@ -269,6 +288,9 @@ class LSTMDAPTDecoder(LSTMDecoder):
         self.pgen_projection = Linear(4 * hidden_size + embed_dim, 1)  # state size: 2*hidden, context_vec: 2*hidden
 
         self.out_projection = Linear(2*hidden_size, hidden_size)
+
+        self.coverage = None
+        self.use_coverage = use_coverage
     
     def extract_features(
         self,
@@ -334,8 +356,10 @@ class LSTMDAPTDecoder(LSTMDecoder):
         key_info = encoder_out[4]  # B x N
         outs = []
         pgen_list = []
+        cov_list = []
 
         for j in range(seqlen):
+            coverage = None
             # input feeding: concatenate context vector from previous time step
             if input_feed is not None:
                 input = torch.cat((x[j, :, :], input_feed), dim=1)  # B x C + 2*C
@@ -359,9 +383,10 @@ class LSTMDAPTDecoder(LSTMDecoder):
             # apply attention using the last layer's hidden state
             if self.attention is not None:
                 assert attn_scores is not None
-                out, attn_scores[:, j, :], _ = self.attention(
-                    hidden, encoder_outs, encoder_padding_mask
+                out, attn_scores[:, j, :], coverage = self.attention(
+                    hidden, encoder_outs, encoder_padding_mask, coverage
                 )  #  out: B x N
+                cov_list.append(coverage.unsqueeze(1))  # T1 x 1 x B
             else:
                 out = hidden
 
@@ -408,7 +433,9 @@ class LSTMDAPTDecoder(LSTMDecoder):
 
         # collect outputs across time steps
         x = torch.cat(outs, dim=0).view(seqlen, bsz, self.hidden_size)
-        p_gens = torch.cat(pgen_list, dim=-1).unsqueeze(-1)  # B x T x 1
+        p_gens = torch.cat(pgen_list, dim=-1).unsqueeze(-1)  # B x T2 x 1
+        coverages = torch.cat(cov_list, dim=1)  # T1 x T2 x B
+        coverages = coverages.transpose(0,2)
 
         # T x B x C -> B x T x C
         x = x.transpose(1, 0)
@@ -418,7 +445,7 @@ class LSTMDAPTDecoder(LSTMDecoder):
             x = self.dropout_out_module(x)
         # srclen x tgtlen x bsz -> bsz x tgtlen x srclen
         attn_scores = attn_scores.transpose(0, 2)
-        return x, attn_scores, p_gens
+        return x, attn_scores, p_gens, coverages
 
     def forward(
         self,
@@ -427,11 +454,11 @@ class LSTMDAPTDecoder(LSTMDecoder):
         incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
         src_lengths: Optional[Tensor] = None,
     ):
-        x, attn_scores, p_gens = self.extract_features(
+        x, attn_scores, p_gens, coverage = self.extract_features(
             prev_output_tokens, encoder_out, incremental_state
         )
 
-        return self.output_layer(x, attn_scores, p_gens, encoder_out[5]), attn_scores
+        return self.output_layer(x, attn_scores, p_gens, encoder_out[5]), attn_scores, coverage
 
     def output_layer(self, x, attn_scores, p_gens, src_tokens):
         """Project features to the vocabulary size."""
@@ -459,29 +486,34 @@ class LSTMDAPTDecoder(LSTMDecoder):
 
         # Final distributions, [batch_size, output_length, num_types].
         return vocab_dist + attn_dists
+    
 
 class LSTMSoftAttention(nn.Module):
-    def __init__(self, hidden_size, coverage=False):
+    def __init__(self, hidden_size, use_coverage=False, cov_truncation=None):
         super().__init__()
-        self.coverage = coverage
-        if coverage:
-            self.W_c = Linear(1, hidden_size * 2, bias=False)
+        self.use_coverage = use_coverage
+        self.cov_truncation = cov_truncation
+        if use_coverage:
+            self.coverage_projection = Linear(1, hidden_size * 2, bias=False)
         self.decode_proj = Linear(hidden_size, hidden_size * 2)
         self.v = Linear(hidden_size * 2, 1, bias=False)
 
 
-    def forward(self, decoder_hidden_states, encoder_outs, encoder_padding_mask):
+    def forward(self, decoder_hidden_states, encoder_outs, encoder_padding_mask, coverage):
         T, B, N = encoder_outs.shape
+        if coverage is None:
+            coverage = torch.zeros([T,B], dtype=torch.float)
 
         dec_fea = self.decode_proj(decoder_hidden_states)  # B x N
         dec_fea_expanded = dec_fea.unsqueeze(0).expand(T, B, N)  # T x B x N
         # dec_fea_expanded = torch.reshape(dec_fea_expanded, [-1, N])  # T*B x N
 
         att_features = encoder_outs + dec_fea_expanded  # T x B x N
-        # if self.coverage:
-        #     coverage_input = torch.reshape(coverage, [-1, 1])  # B * t_k x 1
-        #     coverage_feature = self.W_c(coverage_input)  # B * t_k x 2*hidden_dim
-        #     att_features = att_features + coverage_feature
+        if self.use_coverage:
+            coverage_input = torch.reshape(coverage, [-1, 1])  # T*B x 1
+            coverage_feature = self.coverage_projection(coverage_input)  # T*B x N
+            coverage_feature = coverage_feature.reshape(att_features.shape)
+            att_features = att_features + coverage_feature
 
         e = F.tanh(att_features)  # T x B x N
         attn_scores = self.v(e)  # T x B x 1
@@ -497,14 +529,15 @@ class LSTMSoftAttention(nn.Module):
         attn_dist = F.softmax(attn_scores, dim=0)  # T x B
         c = (attn_dist.unsqueeze(2) * encoder_outs).sum(dim=0)  # B x N
 
-        if self.coverage:
-            coverage = torch.reshape(coverage, [-1, T])
+        # if self.use_coverage:
+        #     coverage = torch.where(
+        #         attn_dist > self.cov_truncation,
+        #         coverage + attn_dist,
+        #         coverage + sys.float_info.epsilon,
+        #     )
+        if self.use_coverage:
             coverage = coverage + attn_dist
-        else:
-            coverage = None
-
         return c, attn_dist, coverage
-
 class LSTMSelfAttention(nn.Module):
     def __init__(self, hidden_size):
         super().__init__()
@@ -637,11 +670,11 @@ def base_architecture(args):
     args.decoder_dropout_in = getattr(args, "decoder_dropout_in", args.dropout)
     args.decoder_dropout_out = getattr(args, "decoder_dropout_out", args.dropout)
     args.share_decoder_input_output_embed = getattr(
-        args, "share_decoder_input_output_embed", False
+        args, "share_decoder_input_output_embed", True
     )
-    args.share_all_embeddings = getattr(args, "share_all_embeddings", False)
+    args.share_all_embeddings = getattr(args, "share_all_embeddings", True)
     args.adaptive_softmax_cutoff = getattr(
-        args, "adaptive_softmax_cutoff", "10000,50000,200000"
+        args, None
     )
 
 @register_model_architecture("lstm_dapt", "dapt_dummy")
