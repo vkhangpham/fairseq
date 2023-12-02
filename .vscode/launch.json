@@ -1,0 +1,115 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "interactive",
+      "type": "python",
+      "request": "launch",
+      "program": "/Users/kylepham/Code/fairseq/fairseq_cli/interactive.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "data-bin/ats-dummy", 
+        "--user-dir", 
+        "examples/dapt/lstm_dapt", 
+        "--batch-size", 
+        "4", 
+        "--source-lang", 
+        "src", 
+        "--target-lang", 
+        "tgt", 
+        "--path", 
+        "checkpoints/dapt/checkpoint_best.pt", 
+        "--input", 
+        "examples/pointer_generator/test.pg.src", 
+        "--buffer-size", 
+        "200", 
+        "--max-len-a", 
+        "0", 
+        "--max-len-b", 
+        "60", 
+        "--lenpen", 
+        "1.0",
+        "--beam",
+        "3", 
+        "--skip-invalid-size-inputs-valid-test"
+      ]
+    },
+    {
+      "name": "Python: Current File",
+      "type": "python",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "train lstm",
+      "type": "python",
+      "request": "launch",
+      "program": "/Users/kylepham/Code/fairseq/train.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "/Users/kylepham/Code/fairseq/data-bin/ats-dummy",
+        "--user-dir",
+        "examples/dapt/lstm_dapt",
+        "--task",
+        "translation",
+        "--source-lang",
+        "src",
+        "--target-lang",
+        "tgt",
+        "--truncate-source",
+        "--arch",
+        "lstm_dummy",
+        "--optimizer",
+        "adam",
+        "--lr",
+        "0.005",
+        "--max-tokens",
+        "2000",
+        "--max-epoch",
+        "1"
+      ]
+    },
+    {
+      "name": "train dapt",
+      "type": "python",
+      "request": "launch",
+      "program": "/Users/kylepham/Code/fairseq/train.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "/Users/kylepham/Code/fairseq/data-bin/ats-dummy",
+        "--user-dir",
+        "examples/dapt/lstm_dapt",
+        "--save-dir",
+        "checkpoints/dapt",
+        "--task",
+        "translation",
+        "--source-lang",
+        "src",
+        "--target-lang",
+        "tgt",
+        "--truncate-source",
+        "--arch",
+        "dapt_base",
+        "--optimizer",
+        "adam",
+        "--lr",
+        "0.005",
+        "--max-tokens",
+        "12000",
+        "--max-epoch",
+        "100",
+        "--skip-invalid-size-inputs-valid-test",
+        "--source-position-markers",
+        "100"
+      ]
+    }
+  ]
+}

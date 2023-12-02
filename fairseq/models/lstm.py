@@ -318,7 +318,7 @@ class LSTMEncoder(FairseqEncoder):
 
         return tuple(
             (
-                x,  # seq_len x batch x hidden
+                x,  # seq_len x batch x num_directions*hidden
                 final_hiddens,  # num_layers x batch x num_directions*hidden
                 final_cells,  # num_layers x batch x num_directions*hidden
                 encoder_padding_mask,  # seq_len x batch
@@ -577,7 +577,6 @@ class LSTMDecoder(FairseqIncrementalDecoder):
 
             # save final output
             outs.append(out)
-
         # Stack all the necessary tensors together and store
         prev_hiddens_tensor = torch.stack(prev_hiddens)
         prev_cells_tensor = torch.stack(prev_cells)
@@ -753,3 +752,66 @@ def lstm_luong_wmt_en_de(args):
     args.decoder_out_embed_dim = getattr(args, "decoder_out_embed_dim", 1000)
     args.decoder_dropout_out = getattr(args, "decoder_dropout_out", 0)
     base_architecture(args)
+
+@register_model_architecture("lstm", "lstm_dummy")
+def lstm_dummy(args):
+    args.dropout = getattr(args, "dropout", 0.1)
+    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 8)
+    args.encoder_embed_path = getattr(args, "encoder_embed_path", None)
+    args.encoder_freeze_embed = getattr(args, "encoder_freeze_embed", False)
+    args.encoder_hidden_size = getattr(
+        args, "encoder_hidden_size", args.encoder_embed_dim
+    )
+    args.encoder_layers = getattr(args, "encoder_layers", 1)
+    args.encoder_bidirectional = getattr(args, "encoder_bidirectional", True)
+    args.encoder_dropout_in = getattr(args, "encoder_dropout_in", args.dropout)
+    args.encoder_dropout_out = getattr(args, "encoder_dropout_out", args.dropout)
+    args.decoder_embed_dim = getattr(args, "decoder_embed_dim",8)
+    args.decoder_embed_path = getattr(args, "decoder_embed_path", None)
+    args.decoder_freeze_embed = getattr(args, "decoder_freeze_embed", False)
+    args.decoder_hidden_size = getattr(
+        args, "decoder_hidden_size", args.decoder_embed_dim
+    )
+    args.decoder_layers = getattr(args, "decoder_layers", 1)
+    args.decoder_out_embed_dim = getattr(args, "decoder_out_embed_dim", 8)
+    args.decoder_attention = getattr(args, "decoder_attention", "1")
+    args.decoder_dropout_in = getattr(args, "decoder_dropout_in", args.dropout)
+    args.decoder_dropout_out = getattr(args, "decoder_dropout_out", args.dropout)
+    args.share_decoder_input_output_embed = getattr(
+        args, "share_decoder_input_output_embed", False
+    )
+    args.share_all_embeddings = getattr(args, "share_all_embeddings", False)
+    args.adaptive_softmax_cutoff = getattr(
+        args, "adaptive_softmax_cutoff", "10000,50000,200000"
+    )
+
+# # Test case
+# import argparse
+
+# # Create args
+# args = argparse.Namespace(
+#     dropout=0.1,
+#     encoder_embed_dim=2,
+#     encoder_freeze_embed=False,
+#     encoder_hidden_size=2,
+#     encoder_layers=1,
+#     encoder_bidirectional=True,
+#     decoder_embed_dim=2,
+#     decoder_freeze_embed=False,
+#     decoder_hidden_size=2,
+#     decoder_layers=1,
+#     decoder_out_embed_dim=2,
+#     decoder_attention='True',
+#     encoder_dropout_in=0.1,
+#     encoder_dropout_out=0.1,
+#     decoder_dropout_in=0.1,
+#     decoder_dropout_out=0.1
+# )
+# from fairseq.tasks.translation import TranslationTask
+# task = TranslationTask()
+# model = LSTMModel.build_model(args, task)
+# src_tokens = torch.randint(0, 100, (5, 10))
+# src_lengths = torch.randint(5, 10, (5,))
+# prev_output_tokens = torch.randint(0, 100, (5, 10))
+# output = model(src_tokens, src_lengths, prev_output_tokens)
+# assert output.shape == (5, 10, num_embeddings)
