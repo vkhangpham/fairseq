@@ -477,12 +477,12 @@ class LSTMDAPTDecoder(LSTMDecoder):
         padding = vocab_dist.new_zeros(padding_size)
         vocab_dist = torch.cat((vocab_dist, padding), 2)
 
-        attn = torch.mul(attn_scores,1 - p_gens)
+        attn = torch.mul(attn_scores, 1.0 - p_gens)
         index = src_tokens[:, None, :]
         index = index.expand(batch_size, output_length, src_length)
         attn_dists_size = (batch_size, output_length, self.num_types)
         attn_dists = attn.new_zeros(attn_dists_size)
-        attn_dists.scatter_add_(2, index, attn.float())
+        attn_dists.scatter_add_(2, index, attn)
 
         # Final distributions, [batch_size, output_length, num_types].
         return vocab_dist + attn_dists
@@ -502,7 +502,7 @@ class LSTMSoftAttention(nn.Module):
     def forward(self, decoder_hidden_states, encoder_outs, encoder_padding_mask, coverage):
         T, B, N = encoder_outs.shape
         if coverage is None:
-            coverage = torch.zeros([T,B], dtype=torch.float)
+            coverage = torch.zeros([T,B], dtype=encoder_outs.dtype, device=encoder_outs.device)
 
         dec_fea = self.decode_proj(decoder_hidden_states)  # B x N
         dec_fea_expanded = dec_fea.unsqueeze(0).expand(T, B, N)  # T x B x N
@@ -674,7 +674,7 @@ def base_architecture(args):
     )
     args.share_all_embeddings = getattr(args, "share_all_embeddings", True)
     args.adaptive_softmax_cutoff = getattr(
-        args, None
+        args, "adaptive_softmax_cutoff", None
     )
 
 @register_model_architecture("lstm_dapt", "dapt_dummy")
