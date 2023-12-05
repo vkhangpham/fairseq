@@ -529,14 +529,15 @@ class LSTMSoftAttention(nn.Module):
         attn_dist = F.softmax(attn_scores, dim=0)  # T x B
         c = (attn_dist.unsqueeze(2) * encoder_outs).sum(dim=0)  # B x N
 
-        # if self.use_coverage:
-        #     coverage = torch.where(
-        #         attn_dist > self.cov_truncation,
-        #         coverage + attn_dist,
-        #         coverage + sys.float_info.epsilon,
-        #     )
+        cov_truncation = torch.mean(attn_dist.max(0).values - attn_dist.min(0).values)
         if self.use_coverage:
-            coverage = coverage + attn_dist
+            coverage = torch.where(
+                attn_dist > cov_truncation,
+                coverage + attn_dist,
+                coverage + sys.float_info.epsilon,
+            )
+        # if self.use_coverage:
+        #     coverage = coverage + attn_dist
         return c, attn_dist, coverage
 class LSTMSelfAttention(nn.Module):
     def __init__(self, hidden_size):
